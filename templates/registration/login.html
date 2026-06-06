@@ -1,0 +1,14 @@
+{% extends "forensics/base.html" %}
+
+{% block title %}Log in · Goggles{% endblock %}
+
+{% block content %}
+<section class="login-panel">
+  <h1>Goggles</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Log in</button>
+  </form>
+</section>
+{% endblock %}
