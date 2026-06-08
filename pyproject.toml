@@ -19,7 +19,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["forensics/migrations/*"]
+extend-exclude = ["forensics/migrations/*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

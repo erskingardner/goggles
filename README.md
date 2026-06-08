@@ -88,7 +88,7 @@ DJANGO_CSRF_COOKIE_SECURE=1
 DJANGO_SECURE_HSTS_SECONDS=31536000
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=0
 DJANGO_SECURE_HSTS_PRELOAD=0
-DATABASE_URL=postgres://goggles:goggles@db:5432/goggles
+DATABASE_URL=postgres://goggles:replace-with-long-random-database-password@db:5432/goggles
 GOGGLES_MAX_DUMP_BYTES=52428800
 POSTGRES_DB=goggles
 POSTGRES_USER=goggles
@@ -103,6 +103,10 @@ import secrets
 print(secrets.token_urlsafe(64))
 PY
 ```
+
+Use the same database password in `DATABASE_URL` and `POSTGRES_PASSWORD`. If the
+database password contains URL punctuation such as `@`, `/`, or `:`, URL-encode
+the password portion in `DATABASE_URL`.
 
 First run:
 
