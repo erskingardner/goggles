@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import RequestDataTooBig
 from django.db.models import Count
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -21,6 +22,10 @@ from .analysis import (
 )
 from .ingest import ingest_audit_log_bytes
 from .models import AuditFile, AuditGroup, UploadToken
+
+
+def healthz(_request: HttpRequest):
+    return JsonResponse({"status": "ok"})
 
 
 @login_required
@@ -75,7 +80,10 @@ def api_audit_log_upload(request: HttpRequest, group_slug: str | None = None):
     if token is None:
         return JsonResponse({"error": "missing or invalid bearer token"}, status=401)
 
-    audit_bytes, source_name, content_type = audit_bytes_from_request(request)
+    try:
+        audit_bytes, source_name, content_type = audit_bytes_from_request(request)
+    except RequestDataTooBig:
+        return JsonResponse({"error": "audit log exceeds maximum upload size"}, status=413)
     if len(audit_bytes) > settings.GOGGLES_MAX_DUMP_BYTES:
         return JsonResponse({"error": "audit log exceeds maximum upload size"}, status=413)
 

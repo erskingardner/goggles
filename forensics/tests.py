@@ -4,7 +4,7 @@ from io import StringIO
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .analysis import timeline_by_engine
@@ -122,13 +122,70 @@ class AuditLogIngestionTests(TestCase):
         self.assertEqual(events[1].epoch, 7)
 
     def test_api_rejects_upload_without_valid_token(self):
-        response = self.client.post(
+        for authorization in ("", "Bearer invalid-token"):
+            headers = {}
+            if authorization:
+                headers["HTTP_AUTHORIZATION"] = authorization
+            response = self.client.post(
+                reverse("api-audit-log-upload"),
+                data=representative_audit_log(),
+                content_type="application/x-ndjson",
+                **headers,
+            )
+
+            self.assertEqual(response.status_code, 401)
+        self.assertEqual(AuditFile.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.count(), 0)
+
+    def test_api_rejects_non_post_upload_attempts_cleanly(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+
+        response = self.client.get(
             reverse("api-audit-log-upload"),
-            data=representative_audit_log(),
-            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(AuditFile.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.count(), 0)
+
+    @override_settings(
+        GOGGLES_MAX_DUMP_BYTES=10,
+        DATA_UPLOAD_MAX_MEMORY_SIZE=1024,
+        FILE_UPLOAD_MAX_MEMORY_SIZE=1024,
+    )
+    def test_api_rejects_oversized_upload_without_saving(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data="x" * 11,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["error"], "audit log exceeds maximum upload size")
+        self.assertEqual(AuditFile.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.count(), 0)
+
+    @override_settings(
+        GOGGLES_MAX_DUMP_BYTES=100,
+        DATA_UPLOAD_MAX_MEMORY_SIZE=10,
+        FILE_UPLOAD_MAX_MEMORY_SIZE=10,
+    )
+    def test_api_rejects_django_body_limit_without_saving(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data="x" * 11,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["error"], "audit log exceeds maximum upload size")
         self.assertEqual(AuditFile.objects.count(), 0)
         self.assertEqual(AuditEvent.objects.count(), 0)
 
@@ -429,6 +486,15 @@ class DashboardTests(TestCase):
         self.assertContains(response, "decrypt_failed")
         self.assertContains(response, "Missing Observations")
         self.assertContains(response, OTHER_MSG_ID)
+
+
+class HealthCheckTests(TestCase):
+    def test_healthz_returns_minimal_json_without_login(self):
+        response = self.client.get(reverse("healthz"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(response.json(), {"status": "ok"})
 
 
 class SeedDevCommandTests(TestCase):

@@ -1,7 +1,7 @@
 [project]
 name = "goggles"
 version = "0.1.0"
-description = "Internal Dark Matter forensic dump explorer"
+description = "Internal Marmot audit-log explorer"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [

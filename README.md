@@ -71,30 +71,140 @@ curl -X POST "http://127.0.0.1:8000/api/v1/audit-logs/?group=qa-fork" \
 
 Upload another one-engine file, such as `fixtures/sample-audit-log-bob.jsonl`, to compare multiple clients in the same group. Invalid JSONL, mixed-engine uploads, or mixed-account uploads return `400` and are still saved as quarantined audit files so damaged lines can be inspected.
 
-## VM Deployment
+## Production Deployment: goggles.ipf.dev
 
-1. Put the VM behind Tailscale, WireGuard, or another private network. Do not expose the app directly to the public internet.
-2. Copy `.env.example` to `.env` and replace every secret value.
-3. Set `DJANGO_ALLOWED_HOSTS` to the internal hostname.
-4. Put Caddy, nginx, or another TLS-terminating reverse proxy in front of `127.0.0.1:8000`.
-5. Start the app:
+Goggles is designed to run on a VM with Docker Compose, Postgres, Gunicorn, and Caddy terminating TLS for `goggles.ipf.dev`. The Compose file binds Django to `127.0.0.1:8000` only; Caddy is the public entrypoint.
+
+Copy `.env.example` to `.env` and replace every secret:
+
+```dotenv
+DJANGO_DEBUG=0
+DJANGO_SECRET_KEY=replace-with-output-of-python-secrets-token-urlsafe-64
+DJANGO_ALLOWED_HOSTS=goggles.ipf.dev
+DJANGO_CSRF_TRUSTED_ORIGINS=https://goggles.ipf.dev
+DJANGO_SECURE_SSL_REDIRECT=0
+DJANGO_SESSION_COOKIE_SECURE=1
+DJANGO_CSRF_COOKIE_SECURE=1
+DJANGO_SECURE_HSTS_SECONDS=31536000
+DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=0
+DJANGO_SECURE_HSTS_PRELOAD=0
+DATABASE_URL=postgres://goggles:goggles@db:5432/goggles
+GOGGLES_MAX_DUMP_BYTES=52428800
+POSTGRES_DB=goggles
+POSTGRES_USER=goggles
+POSTGRES_PASSWORD=replace-with-long-random-database-password
+```
+
+Generate secret values on the VM:
+
+```sh
+python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(64))
+PY
+```
+
+First run:
 
 ```sh
 docker compose up -d --build
-docker compose exec web uv run python manage.py createsuperuser
-docker compose exec web uv run python manage.py create_upload_token "ios qa"
+docker compose ps
+docker compose exec web python manage.py createsuperuser
+docker compose exec web python manage.py create_upload_token "ios qa"
 ```
 
-The compose file binds the web service to `127.0.0.1:8000` on the VM so a reverse proxy or SSH tunnel has to be the public face.
+The web container runs `python manage.py migrate --noinput` before Gunicorn starts, so first-run migrations are handled by startup. Re-run migrations explicitly after deploys if you want to inspect them:
 
-## Security Notes
+```sh
+docker compose exec web python manage.py migrate --noinput
+```
+
+The web container runs `collectstatic` into `var/static-assets`, and Caddy serves `/static/*` from that directory. Django/Gunicorn handles the application and upload API; Caddy handles static assets.
+
+### Caddy
+
+Use `deploy/Caddyfile.goggles.ipf.dev` as the Caddy site snippet:
+
+```caddyfile
+goggles.ipf.dev {
+    request_body {
+        max_size 50MB
+    }
+
+    encode zstd gzip
+
+    handle_path /static/* {
+        root * /srv/goggles/var/static-assets
+        file_server
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8000 {
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}
+```
+
+Adjust `/srv/goggles` if the repo lives somewhere else on Brain. The important name is `var/static-assets`: it contains generated CSS, JavaScript, and admin assets only.
+
+The `request_body` limit should match `GOGGLES_MAX_DUMP_BYTES`. Stock Caddy does not include rate limiting. If the deployed Caddy build includes a rate-limit module, put it in front of the upload paths. If not, rely on private network controls, Caddy body limits, Django bearer tokens, token rotation, and host-level protections such as firewall rules or fail2ban.
+
+Health check:
+
+```sh
+curl -fsS https://goggles.ipf.dev/healthz/
+```
+
+The health endpoint returns only `{"status":"ok"}`. It does not expose config, counts, token status, or raw data.
+
+### Public Surface
+
+Publicly reachable paths are intentionally narrow:
+
+- `GET /accounts/login/`, dashboard pages, and `/admin/`, protected by Django authentication.
+- `POST /api/v1/audit-logs/`, protected by `Authorization: Bearer <token>`.
+- `POST /api/v1/groups/<slug>/audit-logs/`, also bearer-token protected, for fallback grouping.
+- `GET /healthz/`, unauthenticated and non-sensitive.
+
+There is no public signup and no password-reset route configured.
+
+Upload a sample log through the public endpoint:
+
+```sh
+curl -X POST https://goggles.ipf.dev/api/v1/audit-logs/ \
+  -H "Authorization: Bearer $GOGGLES_UPLOAD_TOKEN" \
+  -H "Content-Type: application/x-ndjson" \
+  -H "X-Goggles-Account-Label: Alice" \
+  -H "X-Goggles-Device-Label: Alice iPhone" \
+  -H "X-Goggles-Platform: ios" \
+  --data-binary @fixtures/sample-audit-log-alice.jsonl
+```
+
+Invalid JSONL is saved as a quarantined upload and returns `400`.
+
+### Operational Safety
 
 - Web UI access uses Django users; there is no public signup.
 - Uploads require bearer tokens generated with `create_upload_token`.
 - Upload token secrets are shown once and stored only as keyed hashes.
-- Audit logs preserve raw engine ids, group refs, message ids, digests, payload metadata, raw lines, and raw uploaded text; protect the database and backups accordingly.
+- Rotate tokens by creating a new token, updating clients, then disabling the old token in Django admin or with:
+
+```sh
+docker compose exec web python manage.py shell -c "from forensics.models import UploadToken; UploadToken.objects.filter(token_prefix='OLDPREFIX').update(is_active=False)"
+```
+
+- Audit logs preserve raw engine ids, group refs, message ids, digests, payload metadata, raw lines, raw uploaded text, user agents, and source IPs; protect the database and backups accordingly.
 - Brain disk encryption is the expected at-rest protection for v1.
 - Upload size defaults to 50 MiB via `GOGGLES_MAX_DUMP_BYTES`.
+- Do not log bearer tokens or raw upload bodies. Keep Caddy access logs away from `Authorization` headers.
+- Back up the Postgres named volume with `pg_dump`, store backups encrypted, and test restore before relying on them:
+
+```sh
+mkdir -p backups
+docker compose exec -T db pg_dump -U goggles goggles > backups/goggles-$(date +%F).sql
+cat backups/goggles-YYYY-MM-DD.sql | docker compose exec -T db psql -U goggles goggles
+```
 
 ## What The Dashboard Shows
 
