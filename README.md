@@ -73,7 +73,7 @@ Upload another one-engine file, such as `fixtures/sample-audit-log-bob.jsonl`, t
 
 ## Production Deployment: goggles.ipf.dev
 
-Goggles is designed to run on a VM with Docker Compose, Postgres, Gunicorn, and Caddy terminating TLS for `goggles.ipf.dev`. The Compose file binds Django to `127.0.0.1:8000` only; Caddy is the public entrypoint.
+Goggles is designed to run on a VM with Docker Compose, Postgres, Gunicorn, a small nginx static sidecar, and Caddy terminating TLS for `goggles.ipf.dev`. The Compose file binds Django to `127.0.0.1:8000` and static assets to `127.0.0.1:8001`; Caddy is the public entrypoint.
 
 Copy `.env.example` to `.env` and replace every secret:
 
@@ -123,7 +123,7 @@ The web container runs `python manage.py migrate --noinput` before Gunicorn star
 docker compose exec web python manage.py migrate --noinput
 ```
 
-The web container runs `collectstatic` into `var/static-assets`, and Caddy serves `/static/*` from that directory. Django/Gunicorn handles the application and upload API; Caddy handles static assets.
+The web container runs `collectstatic` into `var/static-assets`. The `static` Compose service serves that directory on `127.0.0.1:8001`, and Caddy proxies `/static/*` to it. Django/Gunicorn handles the application and upload API.
 
 ### Caddy
 
@@ -138,19 +138,16 @@ goggles.ipf.dev {
     encode zstd gzip
 
     handle_path /static/* {
-        root * /srv/goggles/var/static-assets
-        file_server
+        reverse_proxy 127.0.0.1:8001
     }
 
     handle {
-        reverse_proxy 127.0.0.1:8000 {
-            header_up X-Forwarded-Proto {scheme}
-        }
+        reverse_proxy 127.0.0.1:8000
     }
 }
 ```
 
-Adjust `/srv/goggles` if the repo lives somewhere else on Brain. The important name is `var/static-assets`: it contains generated CSS, JavaScript, and admin assets only.
+The static sidecar avoids requiring the Caddy system user to read inside the app checkout. It serves generated CSS, JavaScript, and admin assets only.
 
 The `request_body` limit should match `GOGGLES_MAX_DUMP_BYTES`. Stock Caddy does not include rate limiting. If the deployed Caddy build includes a rate-limit module, put it in front of the upload paths. If not, rely on private network controls, Caddy body limits, Django bearer tokens, token rotation, and host-level protections such as firewall rules or fail2ban.
 

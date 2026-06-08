@@ -32,12 +32,23 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=2).read()\"",
+          "python -c \"import os, urllib.request; host = os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1').split(',')[0].strip(); request = urllib.request.Request('http://127.0.0.1:8000/healthz/', headers={'Host': host}); urllib.request.urlopen(request, timeout=2).read()\"",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  static:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./var/static-assets:/usr/share/nginx/html:ro
+    ports:
+      - "127.0.0.1:8001:80"
 
 volumes:
   postgres-data:

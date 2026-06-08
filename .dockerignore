@@ -9,3 +9,7 @@ db.sqlite3
 var/
 staticfiles/
 backups/
+
+# Local deployment secrets stay outside the repo/build context.
+goggles-secrets.txt
+*-secrets.txt

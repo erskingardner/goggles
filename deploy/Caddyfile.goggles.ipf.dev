@@ -1,18 +1,15 @@
 goggles.ipf.dev {
-    request_body {
-        max_size 50MB
-    }
+	request_body {
+		max_size 50MB
+	}
 
-    encode zstd gzip
+	encode zstd gzip
 
-    handle_path /static/* {
-        root * /srv/goggles/var/static-assets
-        file_server
-    }
+	handle_path /static/* {
+		reverse_proxy 127.0.0.1:8001
+	}
 
-    handle {
-        reverse_proxy 127.0.0.1:8000 {
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
 }
