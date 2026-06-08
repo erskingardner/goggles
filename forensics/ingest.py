@@ -246,7 +246,11 @@ def parse_jsonl(raw_text: str) -> list[ParsedLine]:
 def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     errors: list[str] = []
     normalized: dict[str, Any] = {
-        "schema_version": value_if_str(data.get("schema_version")),
+        "schema_version": bounded_str_or_empty(
+            data.get("schema_version"),
+            "schema_version",
+            errors,
+        ),
         "seq": value_if_int(data.get("seq")),
         "wall_time_ms": value_if_int(data.get("wall_time_ms")),
         "account_ref": (
@@ -287,10 +291,12 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
     event_type = value_if_str(kind.get("type"))
     normalized["raw_kind"] = kind
-    normalized["event_type"] = event_type
     if not event_type:
         errors.append("kind.type must be a non-empty string")
         return normalized, errors
+    if string_exceeds_model_limit("event_type", event_type, errors):
+        return normalized, errors
+    normalized["event_type"] = event_type
 
     variant_errors = normalize_kind(event_type, kind, normalized)
     errors.extend(variant_errors)
@@ -693,9 +699,12 @@ def copy_str(
     errors: list[str],
     field: str,
 ) -> None:
-    value = value_if_str(kind.get(field))
+    raw_value = kind.get(field)
+    value = value_if_str(raw_value)
     if not value:
         errors.append(f"{field} must be a non-empty string")
+        return
+    if string_exceeds_model_limit(field, value, errors):
         return
     normalized[field] = value
 
@@ -711,6 +720,8 @@ def copy_optional_str(
         return
     if not isinstance(value, str):
         errors.append(f"{field} must be a string when present")
+        return
+    if string_exceeds_model_limit(field, value, errors):
         return
     normalized[field] = value
 
@@ -745,6 +756,22 @@ def copy_optional_int(
 
 def value_if_str(value: Any) -> str:
     return value if isinstance(value, str) else ""
+
+
+def bounded_str_or_empty(value: Any, field: str, errors: list[str]) -> str:
+    if not isinstance(value, str):
+        return ""
+    if string_exceeds_model_limit(field, value, errors):
+        return ""
+    return value
+
+
+def string_exceeds_model_limit(field: str, value: str, errors: list[str]) -> bool:
+    max_length = AuditEvent._meta.get_field(field).max_length
+    if max_length is not None and len(value) > max_length:
+        errors.append(f"{field} must be at most {max_length} characters")
+        return True
+    return False
 
 
 def value_if_int(value: Any) -> int | None:

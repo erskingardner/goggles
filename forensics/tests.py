@@ -310,6 +310,39 @@ class AuditLogIngestionTests(TestCase):
         self.assertEqual(bad_event.raw_line, "{not-json}")
         self.assertIn("JSON", bad_event.validation_error)
 
+    def test_overlong_normalized_value_returns_400_and_is_quarantined(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        body = jsonl(
+            audit_event(
+                0,
+                kind={
+                    "type": "ingest_entry",
+                    "msg_id": MSG_ID,
+                    "envelope_kind": "x" * 121,
+                    "payload_len": 512,
+                    "payload_digest": DIGEST_A,
+                },
+            )
+        )
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["validation_status"], "invalid")
+        self.assertIn("envelope_kind", response.json()["error"])
+
+        audit_file = AuditFile.objects.get()
+        self.assertEqual(audit_file.validation_status, AuditFile.STATUS_INVALID)
+        event = audit_file.events.get()
+        self.assertEqual(event.parse_status, AuditEvent.STATUS_INVALID)
+        self.assertIn("envelope_kind", event.validation_error)
+        self.assertEqual(event.envelope_kind, "")
+
     def test_mixed_engine_audit_log_returns_400_and_is_quarantined(self):
         raw_token, _token = UploadToken.issue("mixed client")
         body = jsonl(
