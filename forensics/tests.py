@@ -4,7 +4,9 @@ from io import StringIO
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from .analysis import timeline_by_engine
@@ -486,6 +488,36 @@ class AuditLogIngestionTests(TestCase):
             ),
             [MSG_ID, OTHER_MSG_ID],
         )
+
+    def test_upload_batches_database_work_for_many_lines(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        body = jsonl(
+            *[
+                audit_event(
+                    seq,
+                    kind={
+                        "type": "ingest_entry",
+                        "msg_id": f"{seq:064x}",
+                        "envelope_kind": "group_message",
+                        "payload_len": 512,
+                        "payload_digest": DIGEST_A,
+                    },
+                )
+                for seq in range(20)
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(
+                reverse("api-audit-log-upload"),
+                data=body,
+                content_type="application/x-ndjson",
+                HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertLessEqual(len(queries), 35)
+        self.assertEqual(AuditEvent.objects.count(), 20)
 
 
 class DashboardTests(TestCase):

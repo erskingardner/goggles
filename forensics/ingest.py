@@ -402,45 +402,110 @@ def create_events(
 ) -> tuple[int, set[int]]:
     duplicate_count = 0
     group_ids: set[int] = set()
+    groups_by_key = groups_for_parsed_lines(
+        parsed_lines,
+        fallback_group_slug=fallback_group_slug,
+        fallback_group_name=fallback_group_name,
+    )
+    existing_duplicates = existing_duplicate_events(
+        parsed_lines,
+        ignore_invalid_files=audit_file.validation_status == AuditFile.STATUS_VALID,
+    )
+    events = []
     for parsed in parsed_lines:
-        group = group_for_parsed_line(
+        group_key = group_key_for_parsed_line(
             parsed,
             fallback_group_slug=fallback_group_slug,
-            fallback_group_name=fallback_group_name,
         )
+        group = groups_by_key.get(group_key)
         if group is not None:
             group_ids.add(group.id)
-        if duplicate_event_exists(
-            parsed,
-            ignore_invalid_files=audit_file.validation_status == AuditFile.STATUS_VALID,
-        ):
+        if duplicate_event_exists(parsed, existing_duplicates=existing_duplicates):
             duplicate_count += 1
             continue
         values = event_values(audit_file, parsed, group)
-        AuditEvent.objects.create(**values)
+        events.append(AuditEvent(**values))
+        remember_duplicate_event(parsed, existing_duplicates)
+    AuditEvent.objects.bulk_create(events)
     return duplicate_count, group_ids
 
 
-def duplicate_event_exists(parsed: ParsedLine, *, ignore_invalid_files: bool) -> bool:
-    filters = {"line_hash": parsed.line_hash}
-    engine_id = parsed.normalized.get("engine_id")
-    if engine_id:
-        filters["engine_id"] = engine_id
-    if ignore_invalid_files:
-        filters["audit_file__validation_status"] = AuditFile.STATUS_VALID
-    return AuditEvent.objects.filter(**filters).exists()
-
-
-def group_for_parsed_line(
-    parsed: ParsedLine,
+def groups_for_parsed_lines(
+    parsed_lines: list[ParsedLine],
     *,
     fallback_group_slug: str | None,
     fallback_group_name: str,
-) -> AuditGroup | None:
+) -> dict[tuple[str, str] | None, AuditGroup]:
+    groups = {}
+    for parsed in parsed_lines:
+        group_key = group_key_for_parsed_line(
+            parsed,
+            fallback_group_slug=fallback_group_slug,
+        )
+        if group_key is None or group_key in groups:
+            continue
+        groups[group_key] = group_for_key(group_key, fallback_group_name=fallback_group_name)
+    return groups
+
+
+def group_key_for_parsed_line(
+    parsed: ParsedLine,
+    *,
+    fallback_group_slug: str | None,
+) -> tuple[str, str] | None:
     group_ref = parsed.normalized.get("group_ref") or ""
     if valid_group_ref(group_ref):
-        return group_for_ref(group_ref)
-    return group_for_slug(fallback_group_slug, fallback_group_name)
+        return ("ref", group_ref)
+    if fallback_group_slug:
+        return ("slug", fallback_group_slug)
+    return None
+
+
+def group_for_key(group_key: tuple[str, str], *, fallback_group_name: str) -> AuditGroup:
+    key_type, value = group_key
+    if key_type == "ref":
+        return group_for_ref(value)
+    return group_for_slug(value, fallback_group_name)
+
+
+def existing_duplicate_events(
+    parsed_lines: list[ParsedLine],
+    *,
+    ignore_invalid_files: bool,
+) -> dict[str, set[str]]:
+    line_hashes = {parsed.line_hash for parsed in parsed_lines}
+    if not line_hashes:
+        return {}
+    queryset = AuditEvent.objects.filter(line_hash__in=line_hashes)
+    if ignore_invalid_files:
+        queryset = queryset.filter(audit_file__validation_status=AuditFile.STATUS_VALID)
+    duplicates: dict[str, set[str]] = {}
+    for line_hash, engine_id in queryset.values_list("line_hash", "engine_id"):
+        duplicates.setdefault(line_hash, set()).add(engine_id)
+    return duplicates
+
+
+def duplicate_event_exists(
+    parsed: ParsedLine,
+    *,
+    existing_duplicates: dict[str, set[str]],
+) -> bool:
+    existing_engines = existing_duplicates.get(parsed.line_hash)
+    if not existing_engines:
+        return False
+    engine_id = parsed.normalized.get("engine_id")
+    if engine_id:
+        return engine_id in existing_engines
+    return True
+
+
+def remember_duplicate_event(
+    parsed: ParsedLine,
+    existing_duplicates: dict[str, set[str]],
+) -> None:
+    existing_duplicates.setdefault(parsed.line_hash, set()).add(
+        parsed.normalized.get("engine_id") or ""
+    )
 
 
 def group_for_ref(group_ref: str) -> AuditGroup:
