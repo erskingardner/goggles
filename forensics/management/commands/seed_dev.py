@@ -36,9 +36,7 @@ class Command(BaseCommand):
         user = self.seed_user(username, password)
         seeded_files = [self.seed_audit_log(fixture_path) for fixture_path in fixture_paths]
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Dev user ready: {user.username} / {password}")
-        )
+        self.stdout.write(self.style.SUCCESS(f"Dev user ready: {user.username} / {password}"))
         for audit_file, created in seeded_files:
             verb = "imported" if created else "already present"
             groups = ", ".join(audit_file.group_refs) or "no group refs"

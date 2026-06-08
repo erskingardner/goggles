@@ -100,18 +100,14 @@ def ingest_audit_log_bytes(
     parsed_lines = parse_jsonl(raw_text)
     metadata = file_metadata(parsed_lines)
     validation_errors = [
-        f"line {line.line_number}: {'; '.join(line.errors)}"
-        for line in parsed_lines
-        if line.errors
+        f"line {line.line_number}: {'; '.join(line.errors)}" for line in parsed_lines if line.errors
     ]
     if not parsed_lines:
         validation_errors = ["audit log has no non-empty JSONL lines"]
     else:
         validation_errors.extend(file_validation_errors(parsed_lines))
 
-    validation_status = (
-        AuditFile.STATUS_INVALID if validation_errors else AuditFile.STATUS_VALID
-    )
+    validation_status = AuditFile.STATUS_INVALID if validation_errors else AuditFile.STATUS_VALID
     validation_error = "\n".join(validation_errors)
 
     try:
@@ -254,15 +250,11 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "seq": value_if_int(data.get("seq")),
         "wall_time_ms": value_if_int(data.get("wall_time_ms")),
         "account_ref": (
-            value_if_str(data.get("account_ref"))
-            if data.get("account_ref") is not None
-            else ""
+            value_if_str(data.get("account_ref")) if data.get("account_ref") is not None else ""
         ),
         "engine_id": value_if_str(data.get("engine_id")),
         "group_ref": (
-            value_if_str(data.get("group_ref"))
-            if data.get("group_ref") is not None
-            else ""
+            value_if_str(data.get("group_ref")) if data.get("group_ref") is not None else ""
         ),
     }
 
@@ -275,9 +267,7 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         errors.append("seq must be a non-negative integer")
     if normalized["wall_time_ms"] is None:
         errors.append("wall_time_ms must be a non-negative integer")
-    if normalized["account_ref"] and not is_hex(
-        normalized["account_ref"], exact_len=32
-    ):
+    if normalized["account_ref"] and not is_hex(normalized["account_ref"], exact_len=32):
         errors.append("account_ref must be 32 hex characters when present")
     if not is_hex(normalized["engine_id"], exact_len=32):
         errors.append("engine_id must be 32 hex characters")
@@ -590,9 +580,7 @@ def file_metadata(parsed_lines: list[ParsedLine]) -> dict[str, Any]:
     valid_lines = [line for line in parsed_lines if not line.errors]
     all_line_numbers = [line.line_number for line in parsed_lines]
     seqs = [
-        line.normalized.get("seq")
-        for line in valid_lines
-        if line.normalized.get("seq") is not None
+        line.normalized.get("seq") for line in valid_lines if line.normalized.get("seq") is not None
     ]
     wall_times = [
         line.normalized.get("wall_time_ms")

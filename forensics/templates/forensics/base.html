@@ -12,6 +12,8 @@
     <a class="brand" href="{% url 'group-list' %}">Goggles</a>
     <nav class="nav">
       {% if request.user.is_authenticated %}
+        <a href="{% url 'group-list' %}">Groups</a>
+        <a href="{% url 'upload-log-list' %}">Upload logs</a>
         <span>{{ request.user.username }}</span>
         <form method="post" action="{% url 'logout' %}">
           {% csrf_token %}

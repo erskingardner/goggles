@@ -59,6 +59,11 @@ a:hover {
   color: var(--muted);
 }
 
+.nav a {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 button {
   border: 1px solid var(--accent);
   border-radius: 6px;
@@ -140,6 +145,11 @@ h2 {
   font-weight: 700;
 }
 
+.metrics-compact {
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  min-width: 460px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -190,6 +200,11 @@ pre {
   color: var(--muted);
 }
 
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .status {
   display: inline-block;
   min-width: 56px;
@@ -207,6 +222,12 @@ pre {
 
 .status-invalid {
   background: var(--red);
+}
+
+.detail-row td {
+  border-bottom-color: #fed7aa;
+  background: #fff7ed;
+  color: var(--warn);
 }
 
 .timeline-shell {

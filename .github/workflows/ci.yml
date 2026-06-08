@@ -32,8 +32,30 @@ jobs:
       - name: Run tests
         run: uv run python manage.py test
 
+      - name: Start Postgres test service
+        env:
+          GOGGLES_ENV_FILE: .env.example
+        run: docker compose up -d --wait db-test
+
+      - name: Run tests against Postgres
+        env:
+          DATABASE_URL: postgres://goggles:goggles@127.0.0.1:55432/goggles_test
+        run: uv run python manage.py test
+
+      - name: Stop Postgres test service
+        if: always()
+        env:
+          GOGGLES_ENV_FILE: .env.example
+        run: docker compose rm -sf db-test
+
+      - name: Run Django system checks
+        run: uv run python manage.py check
+
       - name: Run Ruff
         run: uv run ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
 
       - name: Check migration drift
         run: uv run python manage.py makemigrations --check --dry-run

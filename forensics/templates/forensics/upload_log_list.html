@@ -1,0 +1,122 @@
+{% extends "forensics/base.html" %}
+
+{% block title %}Upload logs · Goggles{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Operational logs</p>
+      <h1>Upload logs</h1>
+      <p>Recent audit-log uploads, validation failures, and client metadata.</p>
+    </div>
+    <dl class="metrics metrics-compact">
+      <div>
+        <dt>Total</dt>
+        <dd>{{ stats.total }}</dd>
+      </div>
+      <div>
+        <dt>Valid</dt>
+        <dd>{{ stats.valid }}</dd>
+      </div>
+      <div>
+        <dt>Failed</dt>
+        <dd>{{ stats.invalid }}</dd>
+      </div>
+      <div>
+        <dt>Latest</dt>
+        <dd>{% if latest_upload %}{{ latest_upload.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd>
+      </div>
+    </dl>
+  </section>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Uploaded</th>
+        <th>Status</th>
+        <th>Source</th>
+        <th>Token</th>
+        <th>Events</th>
+        <th>Groups</th>
+        <th>Engines</th>
+        <th>IP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for audit_file in audit_files %}
+        <tr>
+          <td>
+            <a href="{% url 'audit-file-detail' audit_file.id %}">
+              {{ audit_file.created_at|date:"Y-m-d H:i:s" }}
+            </a>
+            <div class="muted">{{ audit_file.byte_size }} bytes</div>
+          </td>
+          <td>
+            <span class="status status-{{ audit_file.validation_status }}">
+              {{ audit_file.validation_status }}
+            </span>
+          </td>
+          <td>
+            {% if audit_file.source_name %}
+              {{ audit_file.source_name }}
+            {% else %}
+              Direct body
+            {% endif %}
+            <div class="muted">
+              {% if audit_file.source_account_label %}{{ audit_file.source_account_label }}{% else %}-{% endif %}
+              {% if audit_file.source_device_label %} · {{ audit_file.source_device_label }}{% endif %}
+            </div>
+            <div class="muted">
+              {% if audit_file.source_platform %}{{ audit_file.source_platform }}{% else %}-{% endif %}
+              {% if audit_file.source_app_version %} · {{ audit_file.source_app_version }}{% endif %}
+            </div>
+          </td>
+          <td>
+            {% if audit_file.upload_token %}
+              {{ audit_file.upload_token.name }}
+              <div class="muted">{{ audit_file.upload_token.token_prefix }}</div>
+            {% else %}
+              <span class="empty">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {{ audit_file.valid_event_count }} valid
+            <div class="muted">
+              {{ audit_file.invalid_event_count }} invalid · {{ audit_file.duplicate_event_count }} dupes
+            </div>
+          </td>
+          <td>
+            {% for group_ref in audit_file.group_refs|slice:":3" %}
+              <code>{{ group_ref }}</code>{% if not forloop.last %}<br>{% endif %}
+            {% empty %}
+              <span class="empty">-</span>
+            {% endfor %}
+            {% if audit_file.group_count %}
+              <div class="muted">{{ audit_file.group_count }} linked</div>
+            {% endif %}
+          </td>
+          <td>
+            {% for engine_id in audit_file.engine_ids|slice:":2" %}
+              <code>{{ engine_id }}</code>{% if not forloop.last %}<br>{% endif %}
+            {% empty %}
+              <span class="empty">-</span>
+            {% endfor %}
+          </td>
+          <td>{{ audit_file.source_ip|default:"-" }}</td>
+        </tr>
+        {% if audit_file.validation_error %}
+          <tr class="detail-row">
+            <td></td>
+            <td colspan="7">
+              <strong>Failure:</strong> {{ audit_file.validation_error|truncatechars:240|linebreaksbr }}
+            </td>
+          </tr>
+        {% endif %}
+      {% empty %}
+        <tr>
+          <td colspan="8" class="empty">No uploads yet.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

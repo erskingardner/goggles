@@ -3,6 +3,8 @@ set dotenv-load := true
 dev_db := env_var_or_default("GOGGLES_DEV_DB", "var/goggles-dev.sqlite3")
 database_url := "sqlite:///" + justfile_directory() + "/" + dev_db
 port := env_var_or_default("GOGGLES_DEV_PORT", "8000")
+test_db_port := env_var_or_default("GOGGLES_TEST_DB_PORT", "55432")
+test_database_url := env_var_or_default("GOGGLES_TEST_DATABASE_URL", "postgres://goggles:goggles@127.0.0.1:" + test_db_port + "/goggles_test")
 python := "uv run python"
 
 alias run := dev
@@ -27,6 +29,10 @@ makemigrations:
 # Fail if model changes need migrations.
 check-migrations:
     {{python}} manage.py makemigrations --check --dry-run
+
+# Run Django's system checks.
+django-check:
+    {{python}} manage.py check
 
 # Seed admin/pass123 and sample audit-log data into the dev database.
 seed: migrate
@@ -56,12 +62,28 @@ shell: migrate
 test:
     {{python}} manage.py test
 
+# Run the Django test suite against a disposable Postgres service.
+test-postgres:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GOGGLES_ENV_FILE='.env.example' GOGGLES_TEST_DB_PORT='{{test_db_port}}' docker compose up -d --wait db-test
+    trap "GOGGLES_ENV_FILE='.env.example' GOGGLES_TEST_DB_PORT='{{test_db_port}}' docker compose rm -sf db-test >/dev/null" EXIT
+    DATABASE_URL='{{test_database_url}}' {{python}} manage.py test
+
 # Run Ruff checks.
 lint:
     uv run ruff check .
 
+# Format Python code with Ruff.
+format:
+    uv run ruff format .
+
+# Fail if Python code is not formatted with Ruff.
+format-check:
+    uv run ruff format --check .
+
 # Run the normal local verification suite.
-check: test lint check-migrations
+check: test django-check lint format-check check-migrations
 
 _dev-db-dir:
     @mkdir -p "$(dirname '{{justfile_directory()}}/{{dev_db}}')"

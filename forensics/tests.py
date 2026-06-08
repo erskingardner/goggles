@@ -554,8 +554,372 @@ class AuditLogIngestionTests(TestCase):
         self.assertLessEqual(len(queries), 35)
         self.assertEqual(AuditEvent.objects.count(), 20)
 
+    def test_all_supported_audit_kind_variants_are_normalized(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        cases = [
+            (
+                "ingest_entry",
+                {
+                    "type": "ingest_entry",
+                    "msg_id": MSG_ID,
+                    "envelope_kind": "group_message",
+                    "payload_len": 512,
+                    "payload_digest": DIGEST_A,
+                },
+                {
+                    "msg_id": MSG_ID,
+                    "envelope_kind": "group_message",
+                    "payload_len": 512,
+                    "payload_digest": DIGEST_A,
+                },
+            ),
+            (
+                "ingest_outcome",
+                {
+                    "type": "ingest_outcome",
+                    "msg_id": MSG_ID,
+                    "outcome_kind": "processed",
+                    "stale_reason": "already_seen",
+                    "epoch": 7,
+                },
+                {
+                    "msg_id": MSG_ID,
+                    "outcome_kind": "processed",
+                    "stale_reason": "already_seen",
+                    "epoch": 7,
+                },
+            ),
+            (
+                "send_entry",
+                {
+                    "type": "send_entry",
+                    "intent_kind": "invite",
+                },
+                {
+                    "intent_kind": "invite",
+                },
+            ),
+            (
+                "send_outcome",
+                {
+                    "type": "send_outcome",
+                    "intent_kind": "invite",
+                    "result_kind": "group_evolution",
+                    "outbound_msg_id": MSG_ID,
+                    "outbound_welcome_msg_ids": [OTHER_MSG_ID],
+                },
+                {
+                    "intent_kind": "invite",
+                    "result_kind": "group_evolution",
+                    "outbound_msg_id": MSG_ID,
+                    "outbound_welcome_msg_ids": [OTHER_MSG_ID],
+                },
+            ),
+            (
+                "epoch_confirmed",
+                {
+                    "type": "epoch_confirmed",
+                    "from_epoch": 6,
+                    "to_epoch": 7,
+                    "pending_kind": "commit",
+                },
+                {
+                    "from_epoch": 6,
+                    "to_epoch": 7,
+                    "pending_kind": "commit",
+                },
+            ),
+            (
+                "epoch_rolled_back",
+                {
+                    "type": "epoch_rolled_back",
+                    "pending_epoch": 8,
+                    "restored_epoch": 6,
+                    "pending_kind": "proposal",
+                },
+                {
+                    "pending_epoch": 8,
+                    "restored_epoch": 6,
+                    "pending_kind": "proposal",
+                },
+            ),
+            (
+                "snapshot_created",
+                {
+                    "type": "snapshot_created",
+                    "snapshot_name": "pre-peel",
+                    "source_epoch": 6,
+                    "reason": "before_rewind",
+                },
+                {
+                    "snapshot_name": "pre-peel",
+                    "source_epoch": 6,
+                    "reason": "before_rewind",
+                },
+            ),
+            (
+                "fork_resolution",
+                {
+                    "type": "fork_resolution",
+                    "source_epoch": 6,
+                    "candidate_digest": DIGEST_A,
+                    "incumbent_digest": DIGEST_B,
+                    "winner": "candidate",
+                    "invalidated_msg_id": OTHER_MSG_ID,
+                },
+                {
+                    "source_epoch": 6,
+                    "candidate_digest": DIGEST_A,
+                    "incumbent_digest": DIGEST_B,
+                    "winner": "candidate",
+                    "invalidated_msg_id": OTHER_MSG_ID,
+                },
+            ),
+            (
+                "convergence_decision",
+                {
+                    "type": "convergence_decision",
+                    "current_tip_epoch": 6,
+                    "candidate_count": 2,
+                    "eligible_count": 1,
+                    "max_rewind_commits": 5,
+                    "selected_branch_id": "branch-a",
+                    "selected_fork_epoch": 6,
+                    "selected_tip_epoch": 7,
+                },
+                {
+                    "current_tip_epoch": 6,
+                    "candidate_count": 2,
+                    "eligible_count": 1,
+                    "max_rewind_commits": 5,
+                    "selected_branch_id": "branch-a",
+                    "selected_fork_epoch": 6,
+                    "selected_tip_epoch": 7,
+                },
+            ),
+            (
+                "peeler_outcome",
+                {
+                    "type": "peeler_outcome",
+                    "msg_id": MSG_ID,
+                    "outcome": "decrypt_failed",
+                    "fallback_snapshot_used": True,
+                    "detail": "no_matching_epoch",
+                },
+                {
+                    "msg_id": MSG_ID,
+                    "outcome": "decrypt_failed",
+                    "fallback_snapshot_used": True,
+                    "detail": "no_matching_epoch",
+                },
+            ),
+            (
+                "auto_commit_decision",
+                {
+                    "type": "auto_commit_decision",
+                    "proposal_kind": "commit",
+                    "decision": "accept",
+                    "reason": "eligible",
+                },
+                {
+                    "proposal_kind": "commit",
+                    "decision": "accept",
+                    "reason": "eligible",
+                },
+            ),
+            (
+                "message_state_changed",
+                {
+                    "type": "message_state_changed",
+                    "msg_id": OTHER_MSG_ID,
+                    "new_state": "epoch_invalidated",
+                    "reason": "fork_loser",
+                },
+                {
+                    "msg_id": OTHER_MSG_ID,
+                    "new_state": "epoch_invalidated",
+                    "reason": "fork_loser",
+                },
+            ),
+            (
+                "rejection",
+                {
+                    "type": "rejection",
+                    "msg_id": OTHER_MSG_ID,
+                    "reason": "bad_epoch",
+                },
+                {
+                    "msg_id": OTHER_MSG_ID,
+                    "reason": "bad_epoch",
+                },
+            ),
+        ]
+        body = jsonl(
+            *[
+                audit_event(seq, kind=kind, wall_time_ms=1_700_000_000_000 + seq)
+                for seq, (_event_type, kind, _expected) in enumerate(cases)
+            ]
+        )
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["event_count"], len(cases))
+        self.assertEqual(response.json()["validation_status"], AuditFile.STATUS_VALID)
+
+        events_by_type = {event.event_type: event for event in AuditEvent.objects.all()}
+        self.assertEqual(
+            set(events_by_type),
+            {event_type for event_type, _kind, _expected in cases},
+        )
+        for event_type, _kind, expected_values in cases:
+            with self.subTest(event_type=event_type):
+                event = events_by_type[event_type]
+                self.assertEqual(event.parse_status, AuditEvent.STATUS_VALID)
+                self.assertEqual(event.validation_error, "")
+                for field, expected_value in expected_values.items():
+                    self.assertEqual(getattr(event, field), expected_value)
+
+    def test_malformed_audit_kind_corpus_is_quarantined(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        missing_kind = audit_event(0)
+        missing_kind.pop("kind")
+        missing_type = audit_event(2)
+        missing_type["kind"] = {}
+        cases = [
+            (
+                missing_kind,
+                "kind must be an object",
+            ),
+            (
+                audit_event(1, kind="not-an-object"),
+                "kind must be an object",
+            ),
+            (
+                missing_type,
+                "kind.type must be a non-empty string",
+            ),
+            (
+                audit_event(3, kind={"type": ""}),
+                "kind.type must be a non-empty string",
+            ),
+            (
+                audit_event(4, kind={"type": "unknown_kind"}),
+                "unknown kind.type 'unknown_kind'",
+            ),
+            (
+                audit_event(
+                    5,
+                    kind={
+                        "type": "ingest_entry",
+                        "envelope_kind": "group_message",
+                        "payload_len": 512,
+                        "payload_digest": DIGEST_A,
+                    },
+                ),
+                "msg_id is required",
+            ),
+        ]
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=jsonl(*(event for event, _expected_error in cases)),
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["validation_status"], AuditFile.STATUS_INVALID)
+        self.assertEqual(response.json()["event_count"], 0)
+        self.assertEqual(response.json()["invalid_event_count"], len(cases))
+
+        audit_file = AuditFile.objects.get()
+        self.assertEqual(audit_file.validation_status, AuditFile.STATUS_INVALID)
+        self.assertEqual(audit_file.valid_event_count, 0)
+        self.assertEqual(audit_file.invalid_event_count, len(cases))
+        self.assertEqual(audit_file.events.count(), len(cases))
+        for line_number, (_event, expected_error) in enumerate(cases, start=1):
+            with self.subTest(line_number=line_number):
+                event = audit_file.events.get(line_number=line_number)
+                self.assertEqual(event.parse_status, AuditEvent.STATUS_INVALID)
+                self.assertIn(expected_error, event.validation_error)
+
 
 class DashboardTests(TestCase):
+    def test_upload_log_list_requires_login(self):
+        response = self.client.get(reverse("upload-log-list"))
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_upload_log_list_shows_successful_and_failed_uploads(self):
+        raw_token, token = UploadToken.issue("ios test client")
+        user = User.objects.create_user(
+            username="analyst",
+            password="correct horse battery staple",
+        )
+
+        valid_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=representative_audit_log(),
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+            HTTP_X_GOGGLES_ACCOUNT_LABEL="Alice",
+            HTTP_X_GOGGLES_DEVICE_LABEL="MacBook",
+            HTTP_X_GOGGLES_PLATFORM="macOS",
+            HTTP_X_GOGGLES_APP_VERSION="1.2.3",
+            HTTP_USER_AGENT="DarkMatter/1.2.3",
+            REMOTE_ADDR="203.0.113.10",
+        )
+        self.assertEqual(valid_response.status_code, 201)
+
+        invalid_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=jsonl(audit_event(9, kind={"type": "unknown_kind"})),
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+            HTTP_X_GOGGLES_PLATFORM="iOS",
+            HTTP_X_GOGGLES_APP_VERSION="9.9.9",
+            REMOTE_ADDR="198.51.100.22",
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+
+        token.refresh_from_db()
+        self.assertIsNotNone(token.last_used_at)
+        valid_file = AuditFile.objects.get(validation_status=AuditFile.STATUS_VALID)
+        invalid_file = AuditFile.objects.get(validation_status=AuditFile.STATUS_INVALID)
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("upload-log-list"))
+
+        self.assertContains(response, "Upload logs")
+        self.assertContains(response, "2")
+        self.assertContains(response, "1")
+        self.assertContains(response, "valid")
+        self.assertContains(response, "invalid")
+        self.assertContains(response, "ios test client")
+        self.assertContains(response, "Alice")
+        self.assertContains(response, "MacBook")
+        self.assertContains(response, "macOS")
+        self.assertContains(response, "1.2.3")
+        self.assertContains(response, "iOS")
+        self.assertContains(response, "9.9.9")
+        self.assertContains(response, "203.0.113.10")
+        self.assertContains(response, "198.51.100.22")
+        self.assertContains(response, "unknown kind.type")
+        self.assertContains(
+            response,
+            f'href="{reverse("audit-file-detail", args=[valid_file.id])}"',
+        )
+        self.assertContains(
+            response,
+            f'href="{reverse("audit-file-detail", args=[invalid_file.id])}"',
+        )
+
     def test_group_detail_is_login_required_and_shows_audit_workflows(self):
         group = AuditGroup.objects.create(
             name="QA fork group",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import RequestDataTooBig
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.template.defaultfilters import slugify
@@ -35,6 +35,30 @@ def group_list(request: HttpRequest):
         event_count=Count("audit_events", distinct=True),
     )
     return render(request, "forensics/group_list.html", {"groups": groups})
+
+
+@login_required
+def upload_log_list(request: HttpRequest):
+    audit_files = (
+        AuditFile.objects.select_related("upload_token", "uploaded_by")
+        .annotate(group_count=Count("events__group", distinct=True))
+        .order_by("-created_at", "-id")[:100]
+    )
+    stats = AuditFile.objects.aggregate(
+        total=Count("id"),
+        valid=Count("id", filter=Q(validation_status=AuditFile.STATUS_VALID)),
+        invalid=Count("id", filter=Q(validation_status=AuditFile.STATUS_INVALID)),
+    )
+    latest_upload = AuditFile.objects.order_by("-created_at", "-id").first()
+    return render(
+        request,
+        "forensics/upload_log_list.html",
+        {
+            "audit_files": audit_files,
+            "stats": stats,
+            "latest_upload": latest_upload,
+        },
+    )
 
 
 @login_required
@@ -195,9 +219,7 @@ def group_name(candidate: str) -> str:
 
 def groups_for_audit_file(audit_file: AuditFile):
     return list(
-        AuditGroup.objects.filter(audit_events__audit_file=audit_file)
-        .distinct()
-        .order_by("slug")
+        AuditGroup.objects.filter(audit_events__audit_file=audit_file).distinct().order_by("slug")
     )
 
 

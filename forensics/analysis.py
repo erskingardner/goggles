@@ -15,15 +15,19 @@ def audit_files_for_group(group):
 
 
 def valid_events_for_group(group):
-    return AuditEvent.objects.filter(
-        group=group,
-        audit_file__validation_status=AuditFile.STATUS_VALID,
-        parse_status=AuditEvent.STATUS_VALID,
-    ).select_related("audit_file").order_by(
-        "wall_time_ms",
-        "engine_id",
-        "line_number",
-        "id",
+    return (
+        AuditEvent.objects.filter(
+            group=group,
+            audit_file__validation_status=AuditFile.STATUS_VALID,
+            parse_status=AuditEvent.STATUS_VALID,
+        )
+        .select_related("audit_file")
+        .order_by(
+            "wall_time_ms",
+            "engine_id",
+            "line_number",
+            "id",
+        )
     )
 
 
@@ -88,10 +92,7 @@ def timeline_by_engine(group):
 
 def timeline_event(event: AuditEvent):
     related_key = (
-        event.msg_id
-        or event.outbound_msg_id
-        or event.candidate_digest
-        or event.payload_digest
+        event.msg_id or event.outbound_msg_id or event.candidate_digest or event.payload_digest
     )
     tone = "send" if event.event_type.startswith("send_") else "receive"
     if event.event_type in {"fork_resolution", "convergence_decision"}:
@@ -225,11 +226,7 @@ def event_row(event: AuditEvent):
         "epoch": event_epoch(event),
         "digest": event.candidate_digest or event.payload_digest or event.incumbent_digest,
         "outcome": (
-            event.outcome
-            or event.outcome_kind
-            or event.decision
-            or event.winner
-            or event.new_state
+            event.outcome or event.outcome_kind or event.decision or event.winner or event.new_state
         ),
         "reason": event.reason or event.stale_reason or event.detail or event.pending_kind,
         "summary": event_summary(event),
