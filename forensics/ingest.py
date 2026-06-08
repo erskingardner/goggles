@@ -401,7 +401,10 @@ def create_events(
         )
         if group is not None:
             group_ids.add(group.id)
-        if duplicate_event_exists(parsed):
+        if duplicate_event_exists(
+            parsed,
+            ignore_invalid_files=audit_file.validation_status == AuditFile.STATUS_VALID,
+        ):
             duplicate_count += 1
             continue
         values = event_values(audit_file, parsed, group)
@@ -409,11 +412,13 @@ def create_events(
     return duplicate_count, group_ids
 
 
-def duplicate_event_exists(parsed: ParsedLine) -> bool:
+def duplicate_event_exists(parsed: ParsedLine, *, ignore_invalid_files: bool) -> bool:
     filters = {"line_hash": parsed.line_hash}
     engine_id = parsed.normalized.get("engine_id")
     if engine_id:
         filters["engine_id"] = engine_id
+    if ignore_invalid_files:
+        filters["audit_file__validation_status"] = AuditFile.STATUS_VALID
     return AuditEvent.objects.filter(**filters).exists()
 
 

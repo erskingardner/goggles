@@ -372,6 +372,53 @@ class AuditLogIngestionTests(TestCase):
         self.assertEqual(AuditEvent.objects.filter(group__slug=GROUP_REF).count(), 3)
         self.assertEqual(AuditFile.objects.order_by("created_at").last().duplicate_event_count, 2)
 
+    def test_corrected_valid_upload_keeps_lines_seen_in_quarantined_upload(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        bad_body = json.dumps(audit_event(0), separators=(",", ":")) + "\n{not-json}\n"
+        corrected_body = jsonl(
+            audit_event(0),
+            audit_event(
+                1,
+                kind={
+                    "type": "message_state_changed",
+                    "msg_id": OTHER_MSG_ID,
+                    "new_state": "processed",
+                    "reason": "state_update",
+                },
+            ),
+        )
+
+        bad_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=bad_body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+        corrected_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=corrected_body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(bad_response.status_code, 400)
+        self.assertEqual(corrected_response.status_code, 201)
+        self.assertEqual(corrected_response.json()["duplicate_event_count"], 0)
+
+        valid_file = AuditFile.objects.get(validation_status=AuditFile.STATUS_VALID)
+        self.assertEqual(valid_file.valid_event_count, 2)
+        self.assertEqual(valid_file.events.count(), 2)
+        self.assertEqual(
+            list(
+                AuditEvent.objects.filter(
+                    group__slug=GROUP_REF,
+                    audit_file__validation_status=AuditFile.STATUS_VALID,
+                    parse_status=AuditEvent.STATUS_VALID,
+                ).values_list("msg_id", flat=True)
+            ),
+            [MSG_ID, OTHER_MSG_ID],
+        )
+
 
 class DashboardTests(TestCase):
     def test_group_detail_is_login_required_and_shows_audit_workflows(self):
