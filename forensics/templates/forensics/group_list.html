@@ -1,0 +1,37 @@
+{% extends "forensics/base.html" %}
+
+{% block title %}Groups · Goggles{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <h1>Groups</h1>
+    <p>Marmot audit logs grouped for comparison.</p>
+  </div>
+</section>
+
+<table>
+  <thead>
+    <tr>
+      <th>Group</th>
+      <th>Audit files</th>
+      <th>Events</th>
+      <th>Updated</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for group in groups %}
+      <tr>
+        <td><a href="{% url 'group-detail' group.slug %}">{{ group.name }}</a></td>
+        <td>{{ group.audit_file_count }}</td>
+        <td>{{ group.event_count }}</td>
+        <td>{{ group.updated_at|date:"Y-m-d H:i" }}</td>
+      </tr>
+    {% empty %}
+      <tr>
+        <td colspan="4" class="empty">No groups yet.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

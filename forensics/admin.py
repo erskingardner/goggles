@@ -1,19 +1,12 @@
 from django.contrib import admin
 
-from .models import (
-    AnalysisRun,
-    DumpUpload,
-    ForensicsMessage,
-    ForensicsSnapshot,
-    Incident,
-    UploadToken,
-)
+from .models import AnalysisRun, AuditEvent, AuditFile, AuditGroup, UploadToken
 
 
-@admin.register(Incident)
-class IncidentAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "created_at", "updated_at")
-    search_fields = ("name", "slug", "notes")
+@admin.register(AuditGroup)
+class AuditGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "group_ref", "created_at", "updated_at")
+    search_fields = ("name", "slug", "group_ref", "notes")
     prepopulated_fields = {"slug": ("name",)}
 
 
@@ -25,66 +18,76 @@ class UploadTokenAdmin(admin.ModelAdmin):
     readonly_fields = ("token_prefix", "token_hash", "created_at", "last_used_at")
 
 
-class ForensicsMessageInline(admin.TabularInline):
-    model = ForensicsMessage
+class AuditEventInline(admin.TabularInline):
+    model = AuditEvent
     extra = 0
     fields = (
-        "message_id",
-        "epoch",
-        "payload_kind",
-        "openmls_content_kind",
-        "openmls_source_epoch",
-        "has_payload_hex",
+        "line_number",
+        "parse_status",
+        "event_type",
+        "account_ref",
+        "engine_id",
+        "group_ref",
+        "msg_id",
+        "wall_time_ms",
+        "validation_error",
     )
     readonly_fields = fields
     can_delete = False
 
 
-class ForensicsSnapshotInline(admin.TabularInline):
-    model = ForensicsSnapshot
-    extra = 0
-    readonly_fields = ("name",)
-    can_delete = False
-
-
-@admin.register(DumpUpload)
-class DumpUploadAdmin(admin.ModelAdmin):
+@admin.register(AuditFile)
+class AuditFileAdmin(admin.ModelAdmin):
     list_display = (
-        "incident",
-        "group_id",
-        "account_id",
-        "epoch",
-        "mode",
-        "producer_version",
+        "id",
+        "source_name",
+        "source_device_label",
+        "validation_status",
+        "valid_event_count",
+        "invalid_event_count",
+        "duplicate_event_count",
         "created_at",
     )
-    list_filter = ("mode", "schema_version", "producer_name")
-    search_fields = ("group_id", "account_id", "raw_sha256")
-    readonly_fields = ("raw_sha256", "created_at")
-    inlines = [ForensicsMessageInline, ForensicsSnapshotInline]
-
-
-@admin.register(ForensicsMessage)
-class ForensicsMessageAdmin(admin.ModelAdmin):
-    list_display = (
-        "message_id",
-        "group_id",
-        "epoch",
-        "payload_kind",
-        "openmls_content_kind",
-        "openmls_source_epoch",
+    list_filter = ("validation_status", "schema_versions")
+    search_fields = (
+        "source_name",
+        "source_account_label",
+        "source_device_label",
+        "source_platform",
+        "file_sha256",
+        "account_refs",
+        "engine_ids",
+        "group_refs",
     )
-    list_filter = ("payload_kind", "openmls_content_kind", "state")
-    search_fields = ("message_id", "group_id", "payload_digest", "openmls_message_digest")
+    readonly_fields = ("file_sha256", "byte_size", "created_at")
+    inlines = [AuditEventInline]
 
 
-@admin.register(ForensicsSnapshot)
-class ForensicsSnapshotAdmin(admin.ModelAdmin):
-    list_display = ("name", "dump")
-    search_fields = ("name",)
+@admin.register(AuditEvent)
+class AuditEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "line_number",
+        "event_type",
+        "parse_status",
+        "account_ref",
+        "engine_id",
+        "msg_id",
+        "wall_time_ms",
+    )
+    list_filter = ("parse_status", "event_type", "outcome", "outcome_kind", "new_state")
+    search_fields = (
+        "account_ref",
+        "engine_id",
+        "group_ref",
+        "msg_id",
+        "payload_digest",
+        "candidate_digest",
+        "incumbent_digest",
+        "raw_line",
+    )
 
 
 @admin.register(AnalysisRun)
 class AnalysisRunAdmin(admin.ModelAdmin):
-    list_display = ("incident", "created_at")
+    list_display = ("group", "created_at")
     readonly_fields = ("created_at",)

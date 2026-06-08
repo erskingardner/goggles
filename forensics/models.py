@@ -6,16 +6,15 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
 
-class Incident(models.Model):
+class AuditGroup(models.Model):
     name = models.CharField(max_length=200)
-    slug = models.SlugField(unique=True)
+    slug = models.SlugField(max_length=160, unique=True)
+    group_ref = models.CharField(max_length=512, blank=True, db_index=True)
     notes = models.TextField(blank=True)
-    expected_redaction_salt_id = models.CharField(max_length=128, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -81,48 +80,57 @@ class UploadToken(models.Model):
         self.save(update_fields=["last_used_at"])
 
 
-class DumpUpload(models.Model):
-    MODE_PUBLIC = "public"
-    MODE_SENSITIVE = "sensitive"
-    MODE_CHOICES = [(MODE_PUBLIC, "Public"), (MODE_SENSITIVE, "Sensitive")]
+class AuditFile(models.Model):
+    STATUS_VALID = "valid"
+    STATUS_INVALID = "invalid"
+    STATUS_CHOICES = [(STATUS_VALID, "Valid"), (STATUS_INVALID, "Invalid")]
 
-    incident = models.ForeignKey(Incident, related_name="uploads", on_delete=models.CASCADE)
     upload_token = models.ForeignKey(
         UploadToken,
-        related_name="uploads",
+        related_name="audit_files",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
     )
     uploaded_by = models.ForeignKey(
         get_user_model(),
-        related_name="forensic_uploads",
+        related_name="audit_log_uploads",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
     )
 
-    raw_sha256 = models.CharField(max_length=64)
+    source_name = models.CharField(max_length=255, blank=True)
+    source_account_label = models.CharField(max_length=255, blank=True)
+    source_device_label = models.CharField(max_length=255, blank=True)
+    source_platform = models.CharField(max_length=120, blank=True)
+    source_app_version = models.CharField(max_length=120, blank=True)
+    content_type = models.CharField(max_length=120, blank=True)
+    file_sha256 = models.CharField(max_length=64)
+    byte_size = models.PositiveBigIntegerField()
     raw_text = models.TextField()
-    raw_json = models.JSONField()
 
-    schema_version = models.CharField(max_length=80)
-    mode = models.CharField(max_length=16, choices=MODE_CHOICES)
-    redaction_salt_id = models.CharField(max_length=128, blank=True)
-    exported_at_ms = models.PositiveBigIntegerField()
+    validation_status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_VALID,
+    )
+    validation_error = models.TextField(blank=True)
+    total_line_count = models.PositiveIntegerField(default=0)
+    valid_event_count = models.PositiveIntegerField(default=0)
+    invalid_event_count = models.PositiveIntegerField(default=0)
+    duplicate_event_count = models.PositiveIntegerField(default=0)
 
-    producer_name = models.CharField(max_length=120)
-    producer_version = models.CharField(max_length=80)
-    account_ref = models.CharField(max_length=256)
-    account_id = models.CharField(max_length=256)
-    group_id = models.CharField(max_length=256)
-    epoch = models.PositiveBigIntegerField(validators=[MinValueValidator(0)])
-    member_count = models.PositiveIntegerField()
-    required_app_components = models.JSONField(default=list, blank=True)
-    admins = models.JSONField(default=list, blank=True)
-    relays = models.JSONField(default=list, blank=True)
-    nostr_group_id = models.CharField(max_length=256, blank=True)
-    warnings = models.JSONField(default=list, blank=True)
+    first_line_number = models.PositiveIntegerField(null=True, blank=True)
+    last_line_number = models.PositiveIntegerField(null=True, blank=True)
+    first_seq = models.PositiveBigIntegerField(null=True, blank=True)
+    last_seq = models.PositiveBigIntegerField(null=True, blank=True)
+    first_wall_time_ms = models.PositiveBigIntegerField(null=True, blank=True)
+    last_wall_time_ms = models.PositiveBigIntegerField(null=True, blank=True)
+    account_refs = models.JSONField(default=list, blank=True)
+    engine_ids = models.JSONField(default=list, blank=True)
+    group_refs = models.JSONField(default=list, blank=True)
+    schema_versions = models.JSONField(default=list, blank=True)
 
     source_ip = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
@@ -132,61 +140,121 @@ class DumpUpload(models.Model):
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["incident", "raw_sha256"],
-                name="unique_dump_upload_per_incident_sha256",
+                fields=["file_sha256"],
+                name="unique_audit_file_sha256",
             )
         ]
         indexes = [
-            models.Index(fields=["group_id", "epoch"]),
-            models.Index(fields=["account_id"]),
+            models.Index(fields=["validation_status"]),
             models.Index(fields=["created_at"]),
         ]
 
     def __str__(self) -> str:
-        return f"{self.group_id} / {self.account_id} / epoch {self.epoch}"
+        return f"audit file {self.id} ({self.validation_status})"
 
 
-class ForensicsMessage(models.Model):
-    dump = models.ForeignKey(DumpUpload, related_name="messages", on_delete=models.CASCADE)
-    message_id = models.CharField(max_length=256)
-    group_id = models.CharField(max_length=256)
-    epoch = models.PositiveBigIntegerField()
-    state = models.CharField(max_length=80)
-    payload_kind = models.CharField(max_length=120)
-    envelope_kind = models.CharField(max_length=120)
-    timestamp = models.PositiveBigIntegerField()
-    payload_len = models.PositiveBigIntegerField()
-    payload_digest = models.CharField(max_length=256)
-    has_payload_hex = models.BooleanField(default=False)
-    openmls_content_kind = models.CharField(max_length=120, blank=True)
-    openmls_source_epoch = models.PositiveBigIntegerField(null=True, blank=True)
-    openmls_message_digest = models.CharField(max_length=256, blank=True)
+class AuditEvent(models.Model):
+    STATUS_VALID = "valid"
+    STATUS_INVALID = "invalid"
+    STATUS_CHOICES = [(STATUS_VALID, "Valid"), (STATUS_INVALID, "Invalid")]
+
+    group = models.ForeignKey(
+        AuditGroup,
+        related_name="audit_events",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    audit_file = models.ForeignKey(AuditFile, related_name="events", on_delete=models.CASCADE)
+    line_number = models.PositiveIntegerField()
+    line_hash = models.CharField(max_length=64)
+    raw_line = models.TextField()
+    raw_event = models.JSONField(null=True, blank=True)
+    raw_kind = models.JSONField(default=dict, blank=True)
+
+    parse_status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_VALID,
+    )
+    validation_error = models.TextField(blank=True)
+
+    schema_version = models.CharField(max_length=80, blank=True)
+    seq = models.PositiveBigIntegerField(null=True, blank=True)
+    wall_time_ms = models.PositiveBigIntegerField(null=True, blank=True)
+    account_ref = models.CharField(max_length=64, blank=True)
+    engine_id = models.CharField(max_length=64, blank=True)
+    group_ref = models.TextField(blank=True)
+    event_type = models.CharField(max_length=80, blank=True)
+
+    msg_id = models.TextField(blank=True)
+    outbound_msg_id = models.TextField(blank=True)
+    outbound_welcome_msg_ids = models.JSONField(default=list, blank=True)
+
+    epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    source_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    from_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    to_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    pending_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    restored_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    current_tip_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    selected_fork_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    selected_tip_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+
+    payload_len = models.PositiveBigIntegerField(null=True, blank=True)
+    payload_digest = models.CharField(max_length=128, blank=True)
+    candidate_digest = models.CharField(max_length=128, blank=True)
+    incumbent_digest = models.CharField(max_length=128, blank=True)
+
+    envelope_kind = models.CharField(max_length=120, blank=True)
+    outcome = models.CharField(max_length=120, blank=True)
+    outcome_kind = models.CharField(max_length=120, blank=True)
+    stale_reason = models.CharField(max_length=160, blank=True)
+    decision = models.CharField(max_length=120, blank=True)
+    reason = models.CharField(max_length=240, blank=True)
+    winner = models.CharField(max_length=120, blank=True)
+    new_state = models.CharField(max_length=120, blank=True)
+    pending_kind = models.CharField(max_length=120, blank=True)
+    intent_kind = models.CharField(max_length=120, blank=True)
+    result_kind = models.CharField(max_length=120, blank=True)
+    proposal_kind = models.CharField(max_length=120, blank=True)
+    snapshot_name = models.CharField(max_length=256, blank=True)
+    selected_branch_id = models.CharField(max_length=256, blank=True)
+    detail = models.TextField(blank=True)
+    fallback_snapshot_used = models.BooleanField(null=True, blank=True)
+    invalidated_msg_id = models.TextField(blank=True)
+    max_rewind_commits = models.PositiveBigIntegerField(null=True, blank=True)
+    candidate_count = models.PositiveIntegerField(null=True, blank=True)
+    eligible_count = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["timestamp", "id"]
+        ordering = ["wall_time_ms", "engine_id", "line_number", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["audit_file", "line_number"],
+                name="unique_audit_event_line_per_file",
+            )
+        ]
         indexes = [
-            models.Index(fields=["group_id", "epoch"]),
-            models.Index(fields=["openmls_content_kind", "openmls_source_epoch"]),
+            models.Index(fields=["account_ref", "engine_id"]),
+            models.Index(fields=["engine_id", "wall_time_ms"]),
+            models.Index(fields=["group_ref", "wall_time_ms"]),
+            models.Index(fields=["msg_id"]),
+            models.Index(fields=["event_type"]),
+            models.Index(fields=["source_epoch"]),
             models.Index(fields=["payload_digest"]),
+            models.Index(fields=["candidate_digest"]),
+            models.Index(fields=["parse_status"]),
         ]
 
     def __str__(self) -> str:
-        return f"{self.message_id} ({self.payload_kind})"
-
-
-class ForensicsSnapshot(models.Model):
-    dump = models.ForeignKey(DumpUpload, related_name="snapshots", on_delete=models.CASCADE)
-    name = models.CharField(max_length=256)
-
-    class Meta:
-        ordering = ["name"]
-
-    def __str__(self) -> str:
-        return self.name
+        label = self.event_type or self.parse_status
+        return f"{self.engine_id} line {self.line_number} {label}"
 
 
 class AnalysisRun(models.Model):
-    incident = models.ForeignKey(Incident, related_name="analysis_runs", on_delete=models.CASCADE)
+    group = models.ForeignKey(AuditGroup, related_name="analysis_runs", on_delete=models.CASCADE)
     report_json = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -194,4 +262,4 @@ class AnalysisRun(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"{self.incident} analysis at {self.created_at:%Y-%m-%d %H:%M:%S}"
+        return f"{self.group} analysis at {self.created_at:%Y-%m-%d %H:%M:%S}"

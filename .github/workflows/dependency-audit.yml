@@ -1,0 +1,44 @@
+name: Dependency audit
+
+on:
+  pull_request:
+  push:
+    branches: ["master"]
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: pip-audit locked dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Export locked dependency set with hashes
+        run: >
+          uv export --locked --all-groups --format requirements-txt
+          -o requirements-audit.txt
+
+      - name: Audit locked dependency set
+        run: >
+          uv run --with pip-audit==2.10.0 pip-audit
+          -r requirements-audit.txt
+          --strict
+          --require-hashes
+          --disable-pip
+          --progress-spinner off

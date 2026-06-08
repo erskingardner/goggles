@@ -3,13 +3,13 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path("", views.incident_list, name="incident-list"),
-    path("incidents/<slug:slug>/", views.incident_detail, name="incident-detail"),
-    path("dumps/<int:pk>/", views.dump_detail, name="dump-detail"),
-    path("api/v1/dumps/", views.api_dump_upload, name="api-dump-upload"),
+    path("", views.group_list, name="group-list"),
+    path("groups/<slug:slug>/", views.group_detail, name="group-detail"),
+    path("audit-files/<int:pk>/", views.audit_file_detail, name="audit-file-detail"),
+    path("api/v1/audit-logs/", views.api_audit_log_upload, name="api-audit-log-upload"),
     path(
-        "api/v1/incidents/<slug:incident_slug>/dumps/",
-        views.api_dump_upload,
-        name="api-incident-dump-upload",
+        "api/v1/groups/<slug:group_slug>/audit-logs/",
+        views.api_audit_log_upload,
+        name="api-group-audit-log-upload",
     ),
 ]
