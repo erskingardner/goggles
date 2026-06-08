@@ -281,8 +281,11 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         errors.append("account_ref must be 32 hex characters when present")
     if not is_hex(normalized["engine_id"], exact_len=32):
         errors.append("engine_id must be 32 hex characters")
-    if normalized["group_ref"] and not is_hex(normalized["group_ref"], even=True):
-        errors.append("group_ref must be even-length hex when present")
+    if normalized["group_ref"] and not valid_group_ref(normalized["group_ref"]):
+        errors.append(
+            "group_ref must be even-length hex and at most "
+            f"{group_ref_max_length()} characters when present"
+        )
 
     kind = data.get("kind")
     if not isinstance(kind, dict):
@@ -435,13 +438,16 @@ def group_for_parsed_line(
     fallback_group_name: str,
 ) -> AuditGroup | None:
     group_ref = parsed.normalized.get("group_ref") or ""
-    if is_hex(group_ref, even=True):
+    if valid_group_ref(group_ref):
         return group_for_ref(group_ref)
     return group_for_slug(fallback_group_slug, fallback_group_name)
 
 
 def group_for_ref(group_ref: str) -> AuditGroup:
-    slug = slugify(group_ref)[:160] or "incoming"
+    existing = AuditGroup.objects.filter(group_ref=group_ref).first()
+    if existing is not None:
+        return existing
+    slug = group_slug_for_ref(group_ref)
     group, created = AuditGroup.objects.get_or_create(
         slug=slug,
         defaults={
@@ -455,6 +461,16 @@ def group_for_ref(group_ref: str) -> AuditGroup:
     elif created:
         group.save(update_fields=["updated_at"])
     return group
+
+
+def group_slug_for_ref(group_ref: str) -> str:
+    slug = slugify(group_ref) or "incoming"
+    max_slug_length = AuditGroup._meta.get_field("slug").max_length
+    if len(slug) <= max_slug_length:
+        return slug
+    digest = hashlib.sha256(group_ref.encode("utf-8")).hexdigest()[:32]
+    prefix_length = max_slug_length - len(digest) - 1
+    return f"{slug[:prefix_length]}-{digest}"
 
 
 def group_for_slug(slug: str | None, name: str = "") -> AuditGroup | None:
@@ -786,3 +802,11 @@ def is_hex(value: Any, *, exact_len: int | None = None, even: bool = False) -> b
     if even and len(value) % 2:
         return False
     return HEX_RE.fullmatch(value) is not None
+
+
+def valid_group_ref(value: Any) -> bool:
+    return is_hex(value, even=True) and len(value) <= group_ref_max_length()
+
+
+def group_ref_max_length() -> int:
+    return AuditGroup._meta.get_field("group_ref").max_length

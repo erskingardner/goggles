@@ -254,6 +254,41 @@ class AuditLogIngestionTests(TestCase):
             [1],
         )
 
+    def test_long_group_refs_with_same_slug_prefix_create_distinct_groups(self):
+        raw_token, _token = UploadToken.issue("alice devices")
+        shared_prefix = "aa" * 80
+        first_group_ref = shared_prefix + "00"
+        second_group_ref = shared_prefix + "11"
+
+        first_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=jsonl(audit_event(0, group_ref=first_group_ref)),
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+        second_response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=jsonl(audit_event(1, group_ref=second_group_ref)),
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(AuditGroup.objects.count(), 2)
+
+        first_group = AuditGroup.objects.get(group_ref=first_group_ref)
+        second_group = AuditGroup.objects.get(group_ref=second_group_ref)
+        self.assertNotEqual(first_group.slug, second_group.slug)
+        self.assertEqual(
+            list(AuditEvent.objects.filter(group=first_group).values_list("group_ref", flat=True)),
+            [first_group_ref],
+        )
+        self.assertEqual(
+            list(AuditEvent.objects.filter(group=second_group).values_list("group_ref", flat=True)),
+            [second_group_ref],
+        )
+
     def test_upload_source_metadata_headers_are_saved(self):
         raw_token, _token = UploadToken.issue("alice iphone")
 
