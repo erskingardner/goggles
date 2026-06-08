@@ -380,6 +380,41 @@ class AuditLogIngestionTests(TestCase):
         self.assertIn("envelope_kind", event.validation_error)
         self.assertEqual(event.envelope_kind, "")
 
+    def test_json_booleans_are_rejected_for_integer_fields(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        body = jsonl(
+            audit_event(
+                True,
+                wall_time_ms=True,
+                kind={
+                    "type": "ingest_entry",
+                    "msg_id": MSG_ID,
+                    "envelope_kind": "group_message",
+                    "payload_len": True,
+                    "payload_digest": DIGEST_A,
+                },
+            )
+        )
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["validation_status"], "invalid")
+        self.assertIn("seq must be a non-negative integer", response.json()["error"])
+        self.assertIn("wall_time_ms must be a non-negative integer", response.json()["error"])
+        self.assertIn("payload_len must be a non-negative integer", response.json()["error"])
+
+        event = AuditEvent.objects.get()
+        self.assertEqual(event.parse_status, AuditEvent.STATUS_INVALID)
+        self.assertIsNone(event.seq)
+        self.assertIsNone(event.wall_time_ms)
+        self.assertIsNone(event.payload_len)
+
     def test_mixed_engine_audit_log_returns_400_and_is_quarantined(self):
         raw_token, _token = UploadToken.issue("mixed client")
         body = jsonl(
