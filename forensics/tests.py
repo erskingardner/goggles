@@ -9,7 +9,13 @@ from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from .analysis import timeline_by_engine
+from .analysis import (
+    audit_files_for_group,
+    group_list_rows,
+    timeline_payload_for_group,
+    valid_events_for_group,
+)
+from .ingest import ingest_audit_log_bytes
 from .models import AuditEvent, AuditFile, AuditGroup, UploadToken
 
 SCHEMA_VERSION = "marmot-forensics-audit/v1"
@@ -440,7 +446,9 @@ class AuditLogIngestionTests(TestCase):
         self.assertEqual(audit_file.invalid_event_count, 0)
         self.assertEqual(audit_file.engine_ids, [ENGINE_ALICE, ENGINE_BOB])
         self.assertEqual(audit_file.events.count(), 2)
-        self.assertEqual(timeline_by_engine(group), [])
+        payload = timeline_payload_for_group(group, list(valid_events_for_group(group)), [])
+        self.assertEqual(payload["engines"], [])
+        self.assertEqual(payload["items"], [])
 
     def test_reuploading_grown_append_only_log_deduplicates_existing_lines(self):
         raw_token, _token = UploadToken.issue("ios test client")
@@ -1021,17 +1029,22 @@ class DashboardTests(TestCase):
         response = self.client.get(reverse("group-detail", kwargs={"slug": group.slug}))
 
         self.assertContains(response, "QA fork group")
-        self.assertContains(response, "Audit Timeline")
+        self.assertContains(response, 'id="timeline-data"')
         self.assertContains(response, ENGINE_ALICE)
         self.assertContains(response, ENGINE_BOB)
-        self.assertContains(response, "Message Trace")
+        self.assertContains(response, "Message trace")
         self.assertContains(response, MSG_ID)
-        self.assertContains(response, "Fork And Convergence")
+        self.assertContains(response, "Fork &amp; convergence")
         self.assertContains(response, "candidate")
-        self.assertContains(response, "Peeler And Rejections")
+        self.assertContains(response, "Peeler &amp; rejections")
         self.assertContains(response, "decrypt_failed")
-        self.assertContains(response, "Missing Observations")
+        self.assertContains(response, "Missing observations")
         self.assertContains(response, OTHER_MSG_ID)
+        payload = response.context["timeline_payload"]
+        self.assertEqual(
+            sorted(payload),
+            ["engines", "epochs", "excluded", "group", "integrity", "items", "time", "version"],
+        )
 
 
 class HealthCheckTests(TestCase):
@@ -1063,3 +1076,413 @@ class SeedDevCommandTests(TestCase):
         )
         self.assertEqual(AuditEvent.objects.filter(group=group).count(), 5)
         self.assertIn("admin / pass123", output.getvalue())
+
+    def test_seed_dev_seeds_fork_demo_group(self):
+        call_command("seed_dev", stdout=StringIO())
+
+        group = AuditGroup.objects.get(group_ref=FORK_DEMO_GROUP_REF)
+        files = list(audit_files_for_group(group))
+        self.assertEqual(len(files), 3)
+        self.assertTrue(all(f.validation_status == AuditFile.STATUS_VALID for f in files))
+
+        events = list(valid_events_for_group(group))
+        self.assertEqual(len(events), 38)
+
+        payload = timeline_payload_for_group(group, events, files)
+        self.assertEqual(
+            [engine["label"] for engine in payload["engines"]],
+            [
+                "Alice / iPhone 15 / ios",
+                "Bob / Pixel 9 / android",
+                "Carol / MacBook Air / macos",
+            ],
+        )
+        self.assertEqual([ep["epoch"] for ep in payload["epochs"]], [5, 6, 7, 8, 9, 10])
+
+        seven = next(ep for ep in payload["epochs"] if ep["epoch"] == 7)
+        self.assertEqual(seven["fork_status"], "resolved")
+        self.assertEqual(len(seven["forks"]), 1)
+        self.assertEqual(seven["forks"][0]["winner"], "incumbent")
+        self.assertEqual(len(seven["snapshots"]), 1)
+        self.assertEqual(len(seven["convergences"]), 1)
+        self.assertEqual(seven["message_event_count"], 3)
+
+        nine = next(ep for ep in payload["epochs"] if ep["epoch"] == 9)
+        self.assertFalse(nine["confirmed"])
+        self.assertEqual(nine["fork_status"], "suspected")
+        self.assertEqual(nine["rollbacks"][0]["role"], "abandoned")
+
+        ten = next(ep for ep in payload["epochs"] if ep["epoch"] == 10)
+        carol_idx = payload["engines"][2]["idx"]
+        self.assertIn(carol_idx, ten["unconfirmed_engines"])
+
+        self.assertTrue(payload["integrity"]["has_fork_activity"])
+        self.assertEqual(payload["integrity"]["divergent_message_count"], 6)
+        self.assertEqual(payload["excluded"]["count"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Timeline payload
+# ---------------------------------------------------------------------------
+
+T0 = 1_700_000_000_000
+ENGINE_CAROL = "fedcba9876543210fedcba9876543210"
+FORK_DEMO_GROUP_REF = "55" * 32
+
+
+def ingest_body(body, **source):
+    return ingest_audit_log_bytes(
+        dump_bytes=body.encode("utf-8"),
+        content_type="application/x-ndjson",
+        **source,
+    )
+
+
+def payload_for(group):
+    return timeline_payload_for_group(
+        group,
+        list(valid_events_for_group(group)),
+        list(audit_files_for_group(group)),
+    )
+
+
+def epoch_confirmed(seq, engine_id, from_epoch, to_epoch, wall_time_ms):
+    return audit_event(
+        seq,
+        engine_id=engine_id,
+        kind={
+            "type": "epoch_confirmed",
+            "from_epoch": from_epoch,
+            "to_epoch": to_epoch,
+            "pending_kind": "commit",
+        },
+        wall_time_ms=wall_time_ms,
+    )
+
+
+class TimelinePayloadTests(TestCase):
+    def test_first_timed_confirmer_gets_commit_role(self):
+        ingest_body(
+            jsonl(epoch_confirmed(0, ENGINE_ALICE, 6, 7, T0)),
+            source_account_label="Alice",
+        )
+        ingest_body(jsonl(epoch_confirmed(0, ENGINE_BOB, 6, 7, T0 + 5000)))
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        payload = payload_for(group)
+
+        self.assertEqual(
+            [engine["engine_id"] for engine in payload["engines"]],
+            [ENGINE_ALICE, ENGINE_BOB],
+        )
+        self.assertEqual(payload["engines"][0]["label"], "Alice")
+        ep = payload["epochs"][0]
+        self.assertEqual(ep["epoch"], 7)
+        self.assertTrue(ep["confirmed"])
+        self.assertEqual(ep["first_confirmed_engine"], 0)
+        self.assertEqual(ep["first_confirmed_ms"], T0)
+        self.assertEqual(ep["spread_ms"], 5000)
+        self.assertEqual(ep["unconfirmed_engines"], [])
+        roles = {item["engine"]: item.get("role") for item in payload["items"]}
+        self.assertEqual(roles, {0: "commit", 1: "applied"})
+        self.assertEqual(
+            [conf["engine"] for conf in ep["confirmations"]],
+            [0, 1],
+        )
+
+    def test_duplicate_confirmation_by_one_engine_sets_repeat_flag(self):
+        ingest_body(jsonl(epoch_confirmed(0, ENGINE_ALICE, 6, 7, T0)))
+        ingest_body(
+            jsonl(
+                epoch_confirmed(0, ENGINE_BOB, 6, 7, T0 + 5000),
+                epoch_confirmed(1, ENGINE_BOB, 6, 7, T0 + 9000),
+            )
+        )
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        ep = payload_for(group)["epochs"][0]
+
+        self.assertEqual(len(ep["confirmations"]), 3)
+        self.assertEqual([conf["repeat"] for conf in ep["confirmations"]], [False, False, True])
+        self.assertEqual(ep["first_confirmed_engine"], 0)
+        self.assertEqual(ep["spread_ms"], 9000)
+
+    def test_unconfirmed_engines_listed_per_epoch(self):
+        ingest_body(jsonl(epoch_confirmed(0, ENGINE_ALICE, 6, 7, T0)))
+        ingest_body(jsonl(audit_event(0, engine_id=ENGINE_CAROL, wall_time_ms=T0 + 100)))
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        payload = payload_for(group)
+
+        self.assertEqual(payload["epochs"][0]["unconfirmed_engines"], [1])
+
+    def test_rollback_creates_stub_epoch_with_roles(self):
+        ingest_body(
+            jsonl(
+                epoch_confirmed(0, ENGINE_BOB, 7, 8, T0),
+                audit_event(
+                    1,
+                    engine_id=ENGINE_BOB,
+                    kind={
+                        "type": "epoch_rolled_back",
+                        "pending_epoch": 9,
+                        "restored_epoch": 8,
+                        "pending_kind": "commit",
+                    },
+                    wall_time_ms=T0 + 1000,
+                ),
+            )
+        )
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        payload = payload_for(group)
+
+        self.assertEqual([ep["epoch"] for ep in payload["epochs"]], [8, 9])
+        eight, nine = payload["epochs"]
+        self.assertTrue(eight["confirmed"])
+        self.assertEqual(eight["rollbacks"][0]["role"], "restored_to")
+        self.assertEqual(eight["fork_status"], "none")
+        self.assertFalse(nine["confirmed"])
+        self.assertIsNone(nine["commit_item_id"])
+        self.assertEqual(nine["rollbacks"][0]["role"], "abandoned")
+        self.assertEqual(nine["fork_status"], "suspected")
+        rollback_item = next(
+            item for item in payload["items"] if item["type"] == "epoch_rolled_back"
+        )
+        self.assertEqual(rollback_item["role"], "rollback")
+
+    def test_fork_resolution_details_on_source_epoch(self):
+        ingest_body(
+            jsonl(
+                audit_event(
+                    0,
+                    kind={
+                        "type": "fork_resolution",
+                        "source_epoch": 6,
+                        "candidate_digest": DIGEST_A,
+                        "incumbent_digest": DIGEST_B,
+                        "winner": "candidate",
+                        "invalidated_msg_id": OTHER_MSG_ID,
+                    },
+                    wall_time_ms=T0,
+                )
+            )
+        )
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        payload = payload_for(group)
+
+        six = payload["epochs"][0]
+        self.assertEqual(six["epoch"], 6)
+        self.assertFalse(six["confirmed"])
+        self.assertEqual(six["fork_status"], "resolved")
+        fork = six["forks"][0]
+        self.assertEqual(fork["winner"], "candidate")
+        self.assertEqual(fork["candidate_digest"], DIGEST_A)
+        self.assertEqual(fork["incumbent_digest"], DIGEST_B)
+        self.assertEqual(fork["invalidated_msg_id"], OTHER_MSG_ID)
+        self.assertTrue(payload["integrity"]["has_fork_activity"])
+
+    def test_message_event_count_uses_event_epoch(self):
+        ingest_body(
+            jsonl(
+                epoch_confirmed(0, ENGINE_ALICE, 6, 7, T0),
+                audit_event(1, wall_time_ms=T0 + 10),
+                audit_event(
+                    2,
+                    kind={
+                        "type": "ingest_outcome",
+                        "msg_id": MSG_ID,
+                        "outcome_kind": "processed",
+                        "epoch": 7,
+                    },
+                    wall_time_ms=T0 + 20,
+                ),
+            )
+        )
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        ep = payload_for(group)["epochs"][0]
+
+        self.assertEqual(ep["message_event_count"], 1)
+
+    def test_null_wall_time_event_excluded_with_count(self):
+        ingest_body(jsonl(audit_event(0, wall_time_ms=T0)))
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+        audit_file = AuditFile.objects.get()
+        orphan = AuditEvent.objects.create(
+            audit_file=audit_file,
+            group=group,
+            line_number=999,
+            line_hash="ff" * 32,
+            raw_line="{}",
+            parse_status=AuditEvent.STATUS_VALID,
+            engine_id=ENGINE_ALICE,
+            event_type="send_entry",
+            intent_kind="message",
+        )
+
+        payload = payload_for(group)
+
+        self.assertNotIn(orphan.id, [item["id"] for item in payload["items"]])
+        self.assertEqual(payload["excluded"]["count"], 1)
+        self.assertEqual(payload["excluded"]["by_reason"]["no_wall_time"], 1)
+        self.assertEqual(payload["excluded"]["event_ids"], [orphan.id])
+
+    def test_engines_ordered_by_first_event(self):
+        ingest_body(jsonl(audit_event(0, wall_time_ms=T0 + 1000)), source_account_label="Alice")
+        ingest_body(
+            jsonl(audit_event(0, engine_id=ENGINE_BOB, account_ref=ACCOUNT_BOB, wall_time_ms=T0)),
+            source_account_label="Bob",
+        )
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        engines = payload_for(group)["engines"]
+
+        self.assertEqual([engine["label"] for engine in engines], ["Bob", "Alice"])
+        self.assertEqual([engine["idx"] for engine in engines], [0, 1])
+        self.assertEqual(engines[0]["initials"], "B")
+        self.assertEqual(engines[0]["short"], ENGINE_BOB[:8])
+        self.assertIn(engines[0]["color_index"], range(1, 9))
+
+    def test_empty_group_payload_shape(self):
+        group = AuditGroup.objects.create(name="Empty", slug="empty", group_ref="ee" * 32)
+
+        payload = payload_for(group)
+
+        self.assertEqual(payload["engines"], [])
+        self.assertEqual(payload["epochs"], [])
+        self.assertEqual(payload["items"], [])
+        self.assertIsNone(payload["time"]["start_ms"])
+        self.assertEqual(payload["integrity"]["divergent_message_count"], 0)
+        self.assertEqual(payload["excluded"]["count"], 0)
+
+    def test_payload_is_json_serializable(self):
+        ingest_body(representative_audit_log())
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        payload = payload_for(group)
+
+        self.assertEqual(json.loads(json.dumps(payload)), payload)
+
+    def test_related_key_falls_back_to_digest(self):
+        ingest_body(jsonl(audit_event(0, wall_time_ms=T0)))
+        group = AuditGroup.objects.get(slug=GROUP_REF)
+
+        item = payload_for(group)["items"][0]
+
+        self.assertEqual(item["related_key"], MSG_ID)
+        self.assertEqual(item["digest"], DIGEST_A)
+
+
+class GroupListAnnotationTests(TestCase):
+    def seed_fork_group(self):
+        ingest_body(
+            jsonl(
+                audit_event(0, wall_time_ms=T0),
+                epoch_confirmed(1, ENGINE_ALICE, 4, 5, T0 + 100),
+                audit_event(
+                    2,
+                    kind={
+                        "type": "fork_resolution",
+                        "source_epoch": 5,
+                        "candidate_digest": DIGEST_A,
+                        "winner": "candidate",
+                    },
+                    wall_time_ms=T0 + 200,
+                ),
+            )
+        )
+        ingest_body(
+            jsonl(
+                audit_event(
+                    0,
+                    engine_id=ENGINE_BOB,
+                    account_ref=ACCOUNT_BOB,
+                    kind={"type": "send_entry", "intent_kind": "message"},
+                    wall_time_ms=T0 + 300,
+                )
+            )
+        )
+
+    def seed_clean_group(self):
+        ingest_body(jsonl(epoch_confirmed(0, ENGINE_CAROL, 2, 3, T0 + 400)))
+
+    def test_rows_annotate_engines_epochs_files_and_divergence(self):
+        self.seed_fork_group()
+        # the clean group lives under a different group_ref
+        ingest_body(
+            jsonl(
+                audit_event(
+                    0,
+                    engine_id=ENGINE_CAROL,
+                    group_ref=OTHER_GROUP_REF,
+                    kind={
+                        "type": "epoch_confirmed",
+                        "from_epoch": 2,
+                        "to_epoch": 3,
+                        "pending_kind": "commit",
+                    },
+                    wall_time_ms=T0 + 400,
+                )
+            )
+        )
+
+        rows = {group.slug: group for group in group_list_rows()}
+
+        fork_group = rows[GROUP_REF]
+        self.assertEqual(fork_group.engine_count, 2)
+        self.assertEqual(fork_group.epoch_min, 4)
+        self.assertEqual(fork_group.epoch_max, 5)
+        self.assertEqual(fork_group.event_count, 4)
+        self.assertEqual(fork_group.audit_file_count, 2)
+        self.assertEqual(fork_group.last_activity_ms, T0 + 300)
+        self.assertTrue(fork_group.has_fork_activity)
+        self.assertEqual(fork_group.divergent_count, 1)  # MSG_ID unseen by bob
+        self.assertIsNotNone(fork_group.last_activity)
+
+        clean_group = rows[OTHER_GROUP_REF]
+        self.assertEqual(clean_group.engine_count, 1)
+        self.assertEqual(clean_group.epoch_min, 2)
+        self.assertEqual(clean_group.epoch_max, 3)
+        self.assertFalse(clean_group.has_fork_activity)
+        self.assertEqual(clean_group.divergent_count, 0)
+
+    def test_group_list_view_query_count_is_bounded(self):
+        self.seed_fork_group()
+        self.seed_clean_group()
+        User.objects.create_user(username="analyst", password="correct horse battery staple")
+        self.client.login(username="analyst", password="correct horse battery staple")
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(reverse("group-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(ctx.captured_queries), 8)
+
+
+class GroupDetailTimelineViewTests(TestCase):
+    def test_group_detail_embeds_timeline_json_script(self):
+        ingest_body(representative_audit_log())
+        User.objects.create_user(username="analyst", password="correct horse battery staple")
+        self.client.login(username="analyst", password="correct horse battery staple")
+
+        response = self.client.get(reverse("group-detail", kwargs={"slug": GROUP_REF}))
+
+        self.assertContains(response, 'id="timeline-data"')
+        payload = response.context["timeline_payload"]
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(len(payload["engines"]), 1)
+        self.assertEqual(json.loads(json.dumps(payload)), payload)
+
+    def test_group_detail_fetches_events_with_bounded_queries(self):
+        ingest_body(representative_audit_log(engine_id=ENGINE_ALICE))
+        ingest_body(representative_audit_log(engine_id=ENGINE_BOB))
+        User.objects.create_user(username="analyst", password="correct horse battery staple")
+        self.client.login(username="analyst", password="correct horse battery staple")
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(reverse("group-detail", kwargs={"slug": GROUP_REF}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(ctx.captured_queries), 12)

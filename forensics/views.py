@@ -14,11 +14,13 @@ from .analysis import (
     audit_files_for_group,
     file_rows_for_group,
     fork_and_convergence_events,
+    group_list_rows,
     group_summary,
     message_traces_for_group,
     missing_observations_for_group,
     peeler_and_rejection_events,
-    timeline_by_engine,
+    timeline_payload_for_group,
+    valid_events_for_group,
 )
 from .ingest import ingest_audit_log_bytes
 from .models import AuditFile, AuditGroup, UploadToken
@@ -30,11 +32,13 @@ def healthz(_request: HttpRequest):
 
 @login_required
 def group_list(request: HttpRequest):
-    groups = AuditGroup.objects.annotate(
-        audit_file_count=Count("audit_events__audit_file", distinct=True),
-        event_count=Count("audit_events", distinct=True),
+    groups = group_list_rows()
+    total_logs = sum(group.audit_file_count for group in groups)
+    return render(
+        request,
+        "forensics/group_list.html",
+        {"groups": groups, "total_logs": total_logs},
     )
-    return render(request, "forensics/group_list.html", {"groups": groups})
 
 
 @login_required
@@ -65,18 +69,20 @@ def upload_log_list(request: HttpRequest):
 def group_detail(request: HttpRequest, slug: str):
     group = get_object_or_404(AuditGroup, slug=slug)
     audit_files = list(audit_files_for_group(group))
+    events = list(valid_events_for_group(group))
+    traces = message_traces_for_group(group, events=events)
     return render(
         request,
         "forensics/group_detail.html",
         {
             "group": group,
-            "summary": group_summary(group, audit_files),
+            "summary": group_summary(group, audit_files, events=events),
             "audit_files": file_rows_for_group(audit_files, group),
-            "timeline_lanes": timeline_by_engine(group),
-            "message_traces": message_traces_for_group(group),
-            "missing_observations": missing_observations_for_group(group),
-            "fork_events": fork_and_convergence_events(group),
-            "peeler_events": peeler_and_rejection_events(group),
+            "message_traces": traces,
+            "missing_observations": missing_observations_for_group(group, traces=traces),
+            "fork_events": fork_and_convergence_events(group, events=events),
+            "peeler_events": peeler_and_rejection_events(group, events=events),
+            "timeline_payload": timeline_payload_for_group(group, events, audit_files),
         },
     )
 

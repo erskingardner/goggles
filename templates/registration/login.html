@@ -1,14 +1,31 @@
 {% extends "forensics/base.html" %}
+{% load static %}
 
 {% block title %}Log in · Goggles{% endblock %}
 
 {% block content %}
-<section class="login-panel">
-  <h1>Goggles</h1>
-  <form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Log in</button>
-  </form>
-</section>
+<div class="login-wrap">
+  <div class="login-brand">
+    <img src="{% static 'forensics/img/goggles-mark.svg' %}" alt="">
+    <span>Goggles</span>
+  </div>
+  <section class="card login-panel">
+    <form method="post" class="card__body">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="form-error">{{ form.non_field_errors.0 }}</div>
+      {% endif %}
+      <div class="field">
+        <label for="{{ form.username.id_for_label }}">Username</label>
+        <input class="input" type="text" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}" autocomplete="username" autofocus required>
+      </div>
+      <div class="field">
+        <label for="{{ form.password.id_for_label }}">Password</label>
+        <input class="input" type="password" name="{{ form.password.html_name }}" id="{{ form.password.id_for_label }}" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn--primary btn--full">Log in</button>
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    </form>
+  </section>
+</div>
 {% endblock %}

@@ -1,37 +1,85 @@
 {% extends "forensics/base.html" %}
+{% load humanize %}
+{% load static %}
 
 {% block title %}Groups · Goggles{% endblock %}
 
 {% block content %}
 <section class="page-heading">
   <div>
+    <p class="eyebrow">Workspace</p>
     <h1>Groups</h1>
-    <p>Marmot audit logs grouped for comparison.</p>
+  </div>
+  <div class="heading-status">
+    <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+    {{ groups|length }} group{{ groups|length|pluralize }} · {{ total_logs }} log{{ total_logs|pluralize }} · chain-of-custody intact
   </div>
 </section>
 
-<table>
-  <thead>
-    <tr>
-      <th>Group</th>
-      <th>Audit files</th>
-      <th>Events</th>
-      <th>Updated</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for group in groups %}
-      <tr>
-        <td><a href="{% url 'group-detail' group.slug %}">{{ group.name }}</a></td>
-        <td>{{ group.audit_file_count }}</td>
-        <td>{{ group.event_count }}</td>
-        <td>{{ group.updated_at|date:"Y-m-d H:i" }}</td>
-      </tr>
-    {% empty %}
-      <tr>
-        <td colspan="4" class="empty">No groups yet.</td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<section class="card card--flush">
+  <header class="card__header"><span class="card__title">All groups</span></header>
+  <div class="card__body table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Group / case</th>
+          <th class="is-right">Engines</th>
+          <th>Epochs</th>
+          <th class="is-right">Events</th>
+          <th class="is-right">Logs</th>
+          <th>Last sync</th>
+          <th>Integrity</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in groups %}
+          <tr data-href="{% url 'group-detail' group.slug %}">
+            <td>
+              <span class="cell-stack">
+                {% if group.engine_count > 2 %}
+                  <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>
+                {% else %}
+                  <svg class="icon" aria-hidden="true"><use href="#i-message"/></svg>
+                {% endif %}
+                <span class="cell-lines">
+                  <a class="cell-title" href="{% url 'group-detail' group.slug %}">{{ group.name }}</a>
+                  <span class="cell-sub">{{ group.group_ref|truncatechars:21 }}</span>
+                </span>
+              </span>
+            </td>
+            <td class="is-right is-mono is-muted">{{ group.engine_count }}</td>
+            <td class="is-mono is-muted">
+              {% if group.epoch_max is not None %}E{{ group.epoch_min }}–E{{ group.epoch_max }}{% else %}–{% endif %}
+            </td>
+            <td class="is-right is-mono is-muted">{{ group.event_count|intcomma }}</td>
+            <td class="is-right is-mono is-muted">{{ group.audit_file_count }}</td>
+            <td class="is-mono is-muted">
+              {% if group.last_activity %}{{ group.last_activity|date:"Y-m-d H:i" }} UTC{% else %}–{% endif %}
+            </td>
+            <td>
+              {% if group.divergent_count %}
+                <span class="badge badge--danger"><span class="badge__dot"></span>{{ group.divergent_count }} divergent</span>
+              {% else %}
+                <span class="badge badge--accent"><span class="badge__dot"></span>consistent</span>
+              {% endif %}
+              {% if group.has_fork_activity %}
+                <span class="badge badge--danger">fork</span>
+              {% endif %}
+            </td>
+            <td class="is-right is-faint"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8" class="empty">No groups yet. Upload an audit log to create one.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{% static 'forensics/js/rowlink.js' %}"></script>
 {% endblock %}
