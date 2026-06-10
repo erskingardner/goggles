@@ -9,7 +9,20 @@ from forensics.ingest import ingest_audit_log_bytes
 DEFAULT_FIXTURES = (
     "sample-audit-log-alice.jsonl",
     "sample-audit-log-bob.jsonl",
+    "sample-fork-demo-alice.jsonl",
+    "sample-fork-demo-bob.jsonl",
+    "sample-fork-demo-carol.jsonl",
 )
+
+# Engine-lane labels for the bundled fixtures so the timeline columns read
+# like real uploads instead of bare hex ids.
+FIXTURE_SOURCE_LABELS = {
+    "sample-audit-log-alice.jsonl": ("Alice", "iPhone 15", "ios"),
+    "sample-audit-log-bob.jsonl": ("Bob", "Pixel 9", "android"),
+    "sample-fork-demo-alice.jsonl": ("Alice", "iPhone 15", "ios"),
+    "sample-fork-demo-bob.jsonl": ("Bob", "Pixel 9", "android"),
+    "sample-fork-demo-carol.jsonl": ("Carol", "MacBook Air", "macos"),
+}
 
 
 class Command(BaseCommand):
@@ -64,9 +77,15 @@ class Command(BaseCommand):
 
     def seed_audit_log(self, fixture_path: Path):
         dump_bytes = fixture_path.read_bytes()
+        account_label, device_label, platform = FIXTURE_SOURCE_LABELS.get(
+            fixture_path.name, ("", "", "")
+        )
         result = ingest_audit_log_bytes(
             dump_bytes=dump_bytes,
             source_name=fixture_path.name,
+            source_account_label=account_label,
+            source_device_label=device_label,
+            source_platform=platform,
             content_type="application/x-ndjson",
         )
         return result.audit_file, result.created

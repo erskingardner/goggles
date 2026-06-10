@@ -2,120 +2,130 @@
 
 {% block title %}Audit file {{ audit_file.id }} · Goggles{% endblock %}
 
+{% block breadcrumb %}
+  <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  <a class="crumb" href="{% url 'upload-log-list' %}">Upload logs</a>
+  <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  <span class="crumb is-current">{{ audit_file.source_name|default:"Audit file" }}</span>
+{% endblock %}
+
 {% block content %}
 <section class="page-heading">
   <div>
     <p class="eyebrow">Audit upload</p>
     <h1>{{ audit_file.source_name|default:"Audit file" }}</h1>
-    <p>{{ audit_file.validation_status }} · {{ audit_file.valid_event_count }} valid · {{ audit_file.invalid_event_count }} invalid · {{ audit_file.duplicate_event_count }} duplicates</p>
+  </div>
+  <div class="heading-status">
+    {% if audit_file.validation_status == "valid" %}
+      <span class="badge badge--accent"><span class="badge__dot"></span>valid</span>
+    {% else %}
+      <span class="badge badge--danger"><span class="badge__dot"></span>invalid</span>
+    {% endif %}
+    {{ audit_file.valid_event_count }} valid · {{ audit_file.invalid_event_count }} invalid · {{ audit_file.duplicate_event_count }} duplicates
   </div>
 </section>
 
-<section>
-  <h2>Source</h2>
-  <dl class="event-card">
-    <div>
-      <dt>Label</dt>
-      <dd>
+<section class="card card--flat">
+  <header class="card__header"><span class="card__title">Source</span></header>
+  <div class="card__body">
+    <div class="rail-row">
+      <span class="eyebrow">Label</span>
+      <span class="rail-row__value">
         {% if audit_file.source_account_label or audit_file.source_device_label or audit_file.source_platform %}
-          {{ audit_file.source_account_label|default:"-" }}{% if audit_file.source_device_label %} / {{ audit_file.source_device_label }}{% endif %}{% if audit_file.source_platform %} / {{ audit_file.source_platform }}{% endif %}
-        {% else %}
-          <span class="empty">-</span>
-        {% endif %}
-      </dd>
+          {{ audit_file.source_account_label|default:"–" }}{% if audit_file.source_device_label %} / {{ audit_file.source_device_label }}{% endif %}{% if audit_file.source_platform %} / {{ audit_file.source_platform }}{% endif %}
+        {% else %}–{% endif %}
+      </span>
     </div>
-    <div>
-      <dt>App Version</dt>
-      <dd>{{ audit_file.source_app_version|default:"-" }}</dd>
+    <div class="rail-row">
+      <span class="eyebrow">App version</span>
+      <span class="rail-row__value">{{ audit_file.source_app_version|default:"–" }}</span>
     </div>
-    <div>
-      <dt>Accounts</dt>
-      <dd>
-        {% for account_ref in audit_file.account_refs %}
-          <code>{{ account_ref }}</code>{% if not forloop.last %}<br>{% endif %}
-        {% empty %}
-          <span class="empty">-</span>
-        {% endfor %}
-      </dd>
+    <div class="rail-row">
+      <span class="eyebrow">Accounts</span>
+      <span class="rail-row__value is-mono">{% for account_ref in audit_file.account_refs %}{{ account_ref }}{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</span>
     </div>
-    <div>
-      <dt>Engines</dt>
-      <dd>
-        {% for engine_id in audit_file.engine_ids %}
-          <code>{{ engine_id }}</code>{% if not forloop.last %}<br>{% endif %}
-        {% empty %}
-          <span class="empty">-</span>
-        {% endfor %}
-      </dd>
+    <div class="rail-row">
+      <span class="eyebrow">Engines</span>
+      <span class="rail-row__value is-mono">{% for engine_id in audit_file.engine_ids %}{{ engine_id }}{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</span>
     </div>
-    <div>
-      <dt>Groups</dt>
-      <dd>
-        {% for group in groups %}
-          <a href="{% url 'group-detail' group.slug %}">{{ group.name }}</a>{% if not forloop.last %}<br>{% endif %}
-        {% empty %}
-          <span class="empty">-</span>
-        {% endfor %}
-      </dd>
+    <div class="rail-row">
+      <span class="eyebrow">Groups</span>
+      <span class="rail-row__value">{% for group in groups %}<a href="{% url 'group-detail' group.slug %}">{{ group.name }}</a>{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</span>
     </div>
-  </dl>
+    <div class="rail-row">
+      <span class="eyebrow">SHA-256</span>
+      <span class="rail-row__value is-mono">{{ audit_file.file_sha256 }}</span>
+    </div>
+  </div>
 </section>
 
 {% if audit_file.validation_error %}
-  <section>
-    <h2>Validation</h2>
-    <pre>{{ audit_file.validation_error }}</pre>
+  <section class="card card--flat">
+    <header class="card__header"><span class="card__title">Validation</span></header>
+    <div class="card__body">
+      <pre class="well">{{ audit_file.validation_error }}</pre>
+    </div>
   </section>
 {% endif %}
 
-<section>
-  <h2>Events</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Line</th>
-        <th>Status</th>
-        <th>Seq</th>
-        <th>Time</th>
-        <th>Account</th>
-        <th>Engine</th>
-        <th>Group</th>
-        <th>Type</th>
-        <th>Message</th>
-        <th>Error</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for event in audit_file.events.all %}
+<section class="card card--flush">
+  <header class="card__header"><span class="card__title">Events</span></header>
+  <div class="card__body table-scroll">
+    <table class="data-table">
+      <thead>
         <tr>
-          <td>{{ event.line_number }}</td>
-          <td><span class="status status-{{ event.parse_status }}">{{ event.parse_status }}</span></td>
-          <td>{{ event.seq|default:"-" }}</td>
-          <td>{{ event.wall_time_ms|default:"-" }}</td>
-          <td><code>{{ event.account_ref|default:"-" }}</code></td>
-          <td><code>{{ event.engine_id|default:"-" }}</code></td>
-          <td>
-            {% if event.group %}
-              <a href="{% url 'group-detail' event.group.slug %}"><code>{{ event.group_ref|default:event.group.slug }}</code></a>
-            {% else %}
-              <code>{{ event.group_ref|default:"-" }}</code>
-            {% endif %}
-          </td>
-          <td>{{ event.event_type|default:"-" }}</td>
-          <td><code>{{ event.msg_id|default:event.outbound_msg_id|default:"-" }}</code></td>
-          <td>{{ event.validation_error|default:"-" }}</td>
+          <th class="is-right">Line</th>
+          <th>Status</th>
+          <th class="is-right">Seq</th>
+          <th>Time (ms)</th>
+          <th>Account</th>
+          <th>Engine</th>
+          <th>Group</th>
+          <th>Type</th>
+          <th>Message</th>
+          <th>Error</th>
         </tr>
-      {% empty %}
-        <tr>
-          <td colspan="10" class="empty">No unique events stored for this file.</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for event in audit_file.events.all %}
+          <tr>
+            <td class="is-right is-mono is-muted">{{ event.line_number }}</td>
+            <td>
+              {% if event.parse_status == "valid" %}
+                <span class="badge badge--accent">valid</span>
+              {% else %}
+                <span class="badge badge--danger">invalid</span>
+              {% endif %}
+            </td>
+            <td class="is-right is-mono is-muted">{{ event.seq|default:"–" }}</td>
+            <td class="is-mono is-muted">{{ event.wall_time_ms|default:"–" }}</td>
+            <td class="is-mono is-muted">{{ event.account_ref|default:"–"|truncatechars:9 }}</td>
+            <td class="is-mono is-muted">{{ event.engine_id|default:"–"|truncatechars:9 }}</td>
+            <td class="is-mono is-muted">
+              {% if event.group %}
+                <a href="{% url 'group-detail' event.group.slug %}">{{ event.group_ref|default:event.group.slug|truncatechars:13 }}</a>
+              {% else %}
+                {{ event.group_ref|default:"–"|truncatechars:13 }}
+              {% endif %}
+            </td>
+            <td>{{ event.event_type|default:"–" }}</td>
+            <td class="is-mono is-muted">{% if event.msg_id %}{{ event.msg_id|truncatechars:13 }}{% elif event.outbound_msg_id %}{{ event.outbound_msg_id|truncatechars:13 }}{% else %}–{% endif %}</td>
+            <td class="is-muted is-wrap">{{ event.validation_error|default:"–" }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="10" class="empty">No unique events stored for this file.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>Raw JSONL</h2>
-  <pre>{{ audit_file.raw_text }}</pre>
+<section class="card card--flat">
+  <header class="card__header"><span class="card__title">Raw JSONL</span></header>
+  <div class="card__body">
+    <pre class="well">{{ audit_file.raw_text }}</pre>
+  </div>
 </section>
 {% endblock %}

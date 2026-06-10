@@ -1,0 +1,6 @@
+<svg width="44" height="32" viewBox="0 0 44 32" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Goggles">
+  <path d="M2.5 13 H7" stroke="#0f9d63" stroke-width="2.6" stroke-linecap="round"></path>
+  <path d="M37 13 H41.5" stroke="#0f9d63" stroke-width="2.6" stroke-linecap="round"></path>
+  <path d="M7 12 Q7 7 12 7 H32 Q37 7 37 12 V15 Q37 21 31 21 H26 Q23 21 22 18 Q21 21 18 21 H13 Q7 21 7 15 Z" stroke="#0f9d63" stroke-width="2.6" stroke-linejoin="round"></path>
+  <path d="M11.5 12 Q12.5 9.5 15.5 9" stroke="#0f9d63" stroke-width="1.6" stroke-linecap="round" opacity="0.55"></path>
+</svg>

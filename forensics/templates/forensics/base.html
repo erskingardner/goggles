@@ -5,25 +5,52 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Goggles{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{% static 'forensics/img/goggles-mark.svg' %}">
+  <link rel="stylesheet" href="{% static 'forensics/fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'forensics/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'forensics/styles.css' %}">
+  {% block extra_css %}{% endblock %}
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem("goggles-theme")
+          || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      } catch (e) { /* theme stays light */ }
+    })();
+  </script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
+  {% include "forensics/_icons.html" %}
   <header class="topbar">
-    <a class="brand" href="{% url 'group-list' %}">Goggles</a>
-    <nav class="nav">
+    <a class="topbar__brand" href="{% url 'group-list' %}" aria-label="Goggles home">
+      <img src="{% static 'forensics/img/goggles-mark.svg' %}" alt="">
+      <span>Goggles</span>
+    </a>
+    <nav class="topbar__crumbs" aria-label="Breadcrumb">
+      {% block breadcrumb %}{% endblock %}
+    </nav>
+    <div class="topbar__spacer"></div>
+    <div class="topbar__actions">
       {% if request.user.is_authenticated %}
-        <a href="{% url 'group-list' %}">Groups</a>
-        <a href="{% url 'upload-log-list' %}">Upload logs</a>
-        <span>{{ request.user.username }}</span>
+        <a class="btn btn--ghost btn--sm" href="{% url 'upload-log-list' %}">Upload logs</a>
+      {% endif %}
+      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon icon--moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="icon icon--sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+      {% if request.user.is_authenticated %}
         <form method="post" action="{% url 'logout' %}">
           {% csrf_token %}
-          <button type="submit">Log out</button>
+          <button type="submit" class="btn btn--secondary btn--sm" title="Signed in as {{ request.user.username }}">Log out</button>
         </form>
       {% endif %}
-    </nav>
+    </div>
   </header>
-  <main class="page">
+  <main class="{% block main_class %}page{% endblock %}">
     {% block content %}{% endblock %}
   </main>
+  <script type="module" src="{% static 'forensics/js/theme.js' %}"></script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
