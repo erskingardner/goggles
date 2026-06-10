@@ -171,6 +171,7 @@ class AuditEvent(models.Model):
     raw_line = models.TextField()
     raw_event = models.JSONField(null=True, blank=True)
     raw_kind = models.JSONField(default=dict, blank=True)
+    raw_context = models.JSONField(default=dict, blank=True)
 
     parse_status = models.CharField(
         max_length=16,
@@ -186,10 +187,29 @@ class AuditEvent(models.Model):
     engine_id = models.CharField(max_length=64, blank=True)
     group_ref = models.TextField(blank=True)
     event_type = models.CharField(max_length=80, blank=True)
+    context_operation_id = models.CharField(max_length=160, blank=True)
+    context_human_action = models.JSONField(default=dict, blank=True)
+    context_transport = models.JSONField(default=dict, blank=True)
+    context_engine = models.JSONField(default=dict, blank=True)
+    context_group = models.JSONField(default=dict, blank=True)
+
+    human_action_action = models.CharField(max_length=120, blank=True)
+    human_action_origin = models.CharField(max_length=80, blank=True)
+    human_action_phase = models.CharField(max_length=80, blank=True)
+    human_action_fields = models.JSONField(default=list, blank=True)
+    human_action_component_ids = models.JSONField(default=list, blank=True)
+    human_action_target_count = models.PositiveIntegerField(null=True, blank=True)
+    human_action_message_ids = models.JSONField(default=list, blank=True)
 
     msg_id = models.TextField(blank=True)
     outbound_msg_id = models.TextField(blank=True)
     outbound_welcome_msg_ids = models.JSONField(default=list, blank=True)
+    target_kind = models.CharField(max_length=120, blank=True)
+    relay_urls = models.JSONField(default=list, blank=True)
+    accepted_relay_urls = models.JSONField(default=list, blank=True)
+    failed_relays = models.JSONField(default=list, blank=True)
+    required_acks = models.PositiveIntegerField(null=True, blank=True)
+    met_required_acks = models.BooleanField(null=True, blank=True)
 
     epoch = models.PositiveBigIntegerField(null=True, blank=True)
     source_epoch = models.PositiveBigIntegerField(null=True, blank=True)
@@ -242,6 +262,8 @@ class AuditEvent(models.Model):
             models.Index(fields=["group_ref", "wall_time_ms"]),
             models.Index(fields=["msg_id"]),
             models.Index(fields=["event_type"]),
+            models.Index(fields=["human_action_action"]),
+            models.Index(fields=["context_operation_id"]),
             models.Index(fields=["source_epoch"]),
             models.Index(fields=["payload_digest"]),
             models.Index(fields=["candidate_digest"]),

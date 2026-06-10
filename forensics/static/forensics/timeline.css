@@ -134,6 +134,41 @@
   background: var(--surface-app);
 }
 
+@media (max-width: 720px) {
+  .tl-header {
+    padding: 14px 12px 0;
+    overflow: hidden;
+  }
+
+  .tl-header__top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tl-header__id {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .tl-header__id .eyebrow,
+  .tl-notes {
+    overflow-wrap: anywhere;
+  }
+
+  .tl-title-row,
+  .tl-header__badges {
+    flex-wrap: wrap;
+  }
+
+  .legend-note {
+    margin-left: 0;
+  }
+
+  .tab-scroll {
+    padding: var(--space-6);
+  }
+}
+
 /* ---- Sticky column header ---- */
 .tl-colhead {
   position: sticky;

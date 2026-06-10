@@ -48,7 +48,7 @@ removes the test database container. Set `GOGGLES_TEST_DB_PORT` or
 
 ## Upload An Audit Log
 
-If the JSONL includes valid `group_ref` values, Goggles will create or reuse those groups automatically. One uploaded file can contain multiple groups, but it should normally contain one `engine_id` and one `account_ref`.
+Each line must be one JSON object in the new action-aware `marmot-forensics-audit/v1` JSONL shape. A valid row must include either `kind.type = "human_action"` or `context.human_action.action`; old action-less audit rows are quarantined. If the JSONL includes valid `group_ref` values, Goggles will create or reuse those groups automatically. One uploaded file can contain multiple groups, but it should normally contain one `engine_id` and one `account_ref`.
 
 ```sh
 curl -X POST http://127.0.0.1:8000/api/v1/audit-logs/ \

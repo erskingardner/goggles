@@ -7,7 +7,7 @@
 {% block main_class %}app-main{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'forensics/timeline.css' %}">
+<link rel="stylesheet" href="{% static 'forensics/timeline.css' %}?v=20260610">
 {% endblock %}
 
 {% block breadcrumb %}
@@ -60,6 +60,9 @@
     <button type="button" class="tab" role="tab" id="tab-timeline" data-panel="panel-timeline" aria-controls="panel-timeline" aria-selected="true">
       Timeline <span class="tab__count">{{ timeline_payload.epochs|length }}</span>
     </button>
+    <button type="button" class="tab" role="tab" id="tab-actions" data-panel="panel-actions" aria-controls="panel-actions" aria-selected="false" tabindex="-1">
+      Actions <span class="tab__count">{{ human_action_groups|length }}</span>
+    </button>
     <button type="button" class="tab" role="tab" id="tab-messages" data-panel="panel-messages" aria-controls="panel-messages" aria-selected="false" tabindex="-1">
       Messages <span class="tab__count">{{ message_traces|length }}</span>
     </button>
@@ -82,6 +85,59 @@
       </div>
     </div>
     <aside id="mls-rail" class="rail" aria-live="polite" aria-label="MLS state at selected epoch"></aside>
+  </section>
+
+  <section id="panel-actions" class="tab-scroll" role="tabpanel" aria-labelledby="tab-actions" hidden>
+    {% if human_action_groups %}
+      {% for action_group in human_action_groups %}
+        <section class="action-group">
+          <header class="action-group__header">
+            <div class="action-group__title">
+              <span class="badge badge--accent"><span class="badge__dot"></span>{{ action_group.action }}</span>
+              <h3>{{ action_group.action_label }}</h3>
+            </div>
+            <div class="action-group__meta">
+              {% if action_group.origin %}<span>{{ action_group.origin }}</span>{% endif %}
+              {% if action_group.phase %}<span>{{ action_group.phase }}</span>{% endif %}
+              {% if action_group.operation_id %}<span class="is-mono">{{ action_group.operation_id }}</span>{% endif %}
+            </div>
+          </header>
+          <div class="action-group__facts">
+            <span><strong>Fields</strong> {% for field in action_group.fields %}{{ field }}{% if not forloop.last %}, {% endif %}{% empty %}–{% endfor %}</span>
+            <span><strong>Components</strong> {% for component_id in action_group.component_ids %}<span class="is-mono">{{ component_id }}</span>{% if not forloop.last %}, {% endif %}{% empty %}–{% endfor %}</span>
+            <span><strong>Targets</strong> {{ action_group.target_count|default:"–" }}</span>
+            <span><strong>Epoch</strong> {% if action_group.from_epoch != None or action_group.to_epoch != None %}<span class="is-mono">{{ action_group.from_epoch|default:"–" }} → {{ action_group.to_epoch|default:"–" }}</span>{% else %}–{% endif %}</span>
+            <span><strong>Messages</strong> {% for msg_id in action_group.message_ids|slice:":3" %}<span class="is-mono">{{ msg_id|truncatechars:13 }}</span>{% if not forloop.last %}, {% endif %}{% empty %}–{% endfor %}</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Time (ms)</th>
+                  <th>Type</th>
+                  <th>Message</th>
+                  <th>Relay</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for event in action_group.events %}
+                  <tr>
+                    <td class="is-mono is-muted">{{ event.wall_time_ms|default:"–" }}</td>
+                    <td>{{ event.event_type }}</td>
+                    <td class="is-mono is-muted">{% for msg_id in event.message_ids|slice:":2" %}{{ msg_id|truncatechars:13 }}{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</td>
+                    <td class="is-muted is-wrap">{{ event.relay_summary|default:"–" }}</td>
+                    <td class="is-muted is-wrap">{{ event.summary }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endfor %}
+    {% else %}
+      <p class="empty-state">No new-format human actions found for this group.</p>
+    {% endif %}
   </section>
 
   <section id="panel-messages" class="tab-scroll" role="tabpanel" aria-labelledby="tab-messages" hidden>

@@ -277,6 +277,8 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             f"{group_ref_max_length()} characters when present"
         )
 
+    normalize_context(data.get("context"), normalized, errors)
+
     kind = data.get("kind")
     if not isinstance(kind, dict):
         errors.append("kind must be an object")
@@ -293,6 +295,10 @@ def normalize_event(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
     variant_errors = normalize_kind(event_type, kind, normalized)
     errors.extend(variant_errors)
+    if not normalized.get("human_action_action"):
+        errors.append(
+            "new audit rows must include kind.type 'human_action' or context.human_action.action"
+        )
     return normalized, errors
 
 
@@ -322,6 +328,31 @@ def normalize_kind(event_type: str, kind: dict[str, Any], normalized: dict[str, 
                 errors.append("outbound_welcome_msg_ids must be a list of hex strings")
             else:
                 normalized["outbound_welcome_msg_ids"] = welcome_ids
+        case "human_action":
+            copy_human_action_fields(kind, normalized, errors)
+        case "publish_attempt":
+            copy_publish_fields(kind, normalized, errors)
+            copy_optional_str_list(kind, normalized, errors, "relay_urls")
+        case "publish_outcome":
+            copy_publish_fields(kind, normalized, errors)
+            copy_optional_str_list(kind, normalized, errors, "accepted_relay_urls")
+            failed_relays = kind.get("failed_relays")
+            if failed_relays is not None:
+                if not isinstance(failed_relays, list):
+                    errors.append("failed_relays must be a list when present")
+                else:
+                    normalized["failed_relays"] = failed_relays
+            met_required_acks = kind.get("met_required_acks")
+            if met_required_acks is not None:
+                if not isinstance(met_required_acks, bool):
+                    errors.append("met_required_acks must be a boolean when present")
+                else:
+                    normalized["met_required_acks"] = met_required_acks
+        case "publish_failure":
+            copy_publish_fields(kind, normalized, errors)
+            copy_optional_str(kind, normalized, errors, "reason")
+            copy_optional_str(kind, normalized, errors, "detail")
+            copy_optional_str_list(kind, normalized, errors, "relay_urls")
         case "epoch_confirmed":
             copy_int(kind, normalized, errors, "from_epoch")
             copy_int(kind, normalized, errors, "to_epoch")
@@ -379,8 +410,35 @@ def normalize_kind(event_type: str, kind: dict[str, Any], normalized: dict[str, 
             copy_msg_id(kind, normalized, errors)
             copy_str(kind, normalized, errors, "reason")
         case _:
-            errors.append(f"unknown kind.type {event_type!r}")
+            pass
     return errors
+
+
+def normalize_context(
+    context: Any,
+    normalized: dict[str, Any],
+    errors: list[str],
+) -> None:
+    if context is None:
+        return
+    if not isinstance(context, dict):
+        errors.append("context must be an object when present")
+        return
+
+    normalized["raw_context"] = context
+    operation_id = context.get("operation_id")
+    if operation_id is not None:
+        copy_context_str(context, normalized, errors, "operation_id", "context_operation_id")
+    human_action = context.get("human_action")
+    if human_action is not None:
+        if not isinstance(human_action, dict):
+            errors.append("context.human_action must be an object when present")
+        else:
+            normalized["context_human_action"] = human_action
+            copy_human_action_fields(human_action, normalized, errors)
+    for field in ("transport", "engine", "group"):
+        if field in context and context[field] is not None:
+            normalized[f"context_{field}"] = context[field]
 
 
 def create_events(
@@ -561,6 +619,7 @@ def event_values(
         values.update(
             {
                 "raw_kind": parsed.normalized.get("raw_kind") or {},
+                "raw_context": parsed.normalized.get("raw_context") or {},
                 "schema_version": parsed.normalized.get("schema_version") or "",
                 "seq": parsed.normalized.get("seq"),
                 "wall_time_ms": parsed.normalized.get("wall_time_ms"),
@@ -666,6 +725,24 @@ def normalized_fields() -> tuple[str, ...]:
         "msg_id",
         "outbound_msg_id",
         "outbound_welcome_msg_ids",
+        "target_kind",
+        "relay_urls",
+        "accepted_relay_urls",
+        "failed_relays",
+        "required_acks",
+        "met_required_acks",
+        "context_operation_id",
+        "context_human_action",
+        "context_transport",
+        "context_engine",
+        "context_group",
+        "human_action_action",
+        "human_action_origin",
+        "human_action_phase",
+        "human_action_fields",
+        "human_action_component_ids",
+        "human_action_target_count",
+        "human_action_message_ids",
         "epoch",
         "source_epoch",
         "from_epoch",
@@ -700,6 +777,132 @@ def normalized_fields() -> tuple[str, ...]:
         "candidate_count",
         "eligible_count",
     )
+
+
+def copy_human_action_fields(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+) -> None:
+    copy_human_action_str(source, normalized, errors, "action", "human_action_action")
+    copy_human_action_str(source, normalized, errors, "origin", "human_action_origin")
+    copy_human_action_str(source, normalized, errors, "phase", "human_action_phase")
+    copy_optional_str_list(source, normalized, errors, "fields", "human_action_fields")
+    copy_optional_int_list(
+        source,
+        normalized,
+        errors,
+        "component_ids",
+        "human_action_component_ids",
+    )
+    copy_optional_int(source, normalized, errors, "target_count", "human_action_target_count")
+    copy_optional_msg_id_list(
+        source,
+        normalized,
+        errors,
+        "message_ids",
+        "human_action_message_ids",
+    )
+    copy_optional_int(source, normalized, errors, "from_epoch")
+    copy_optional_int(source, normalized, errors, "to_epoch")
+
+
+def copy_publish_fields(
+    kind: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+) -> None:
+    copy_optional_msg_id(kind, normalized, errors, "msg_id")
+    copy_optional_str(kind, normalized, errors, "target_kind")
+    copy_optional_int(kind, normalized, errors, "required_acks")
+    relay_url = kind.get("relay_url")
+    if relay_url is not None:
+        if not isinstance(relay_url, str):
+            errors.append("relay_url must be a string when present")
+        elif "relay_urls" not in kind:
+            normalized["relay_urls"] = [relay_url]
+
+
+def copy_context_str(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+    source_field: str,
+    dest_field: str,
+) -> None:
+    value = source.get(source_field)
+    if not isinstance(value, str):
+        errors.append(f"context.{source_field} must be a string when present")
+        return
+    if string_exceeds_model_limit(dest_field, value, errors):
+        return
+    normalized[dest_field] = value
+
+
+def copy_human_action_str(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+    source_field: str,
+    dest_field: str,
+) -> None:
+    value = source.get(source_field)
+    if value is None:
+        return
+    if not isinstance(value, str):
+        errors.append(f"human_action.{source_field} must be a string when present")
+        return
+    if string_exceeds_model_limit(dest_field, value, errors):
+        return
+    normalized[dest_field] = value
+
+
+def copy_optional_str_list(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+    source_field: str,
+    dest_field: str | None = None,
+) -> None:
+    value = source.get(source_field)
+    if value is None:
+        return
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        errors.append(f"{source_field} must be a list of strings when present")
+        return
+    normalized[dest_field or source_field] = value
+
+
+def copy_optional_int_list(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+    source_field: str,
+    dest_field: str,
+) -> None:
+    value = source.get(source_field)
+    if value is None:
+        return
+    if not isinstance(value, list) or any(value_if_int(item) is None for item in value):
+        errors.append(f"human_action.{source_field} must be a list of non-negative integers")
+        return
+    normalized[dest_field] = value
+
+
+def copy_optional_msg_id_list(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+    errors: list[str],
+    source_field: str,
+    dest_field: str,
+) -> None:
+    value = source.get(source_field)
+    if value is None:
+        return
+    if not isinstance(value, list) or any(not is_hex(item, even=True) for item in value):
+        errors.append(f"human_action.{source_field} must be a list of hex strings")
+        return
+    normalized[dest_field] = value
 
 
 def copy_msg_id(kind: dict[str, Any], normalized: dict[str, Any], errors: list[str]) -> None:
@@ -813,6 +1016,7 @@ def copy_optional_int(
     normalized: dict[str, Any],
     errors: list[str],
     field: str,
+    dest_field: str | None = None,
 ) -> None:
     if kind.get(field) is None:
         return
@@ -820,7 +1024,7 @@ def copy_optional_int(
     if value is None:
         errors.append(f"{field} must be a non-negative integer when present")
         return
-    normalized[field] = value
+    normalized[dest_field or field] = value
 
 
 def value_if_str(value: Any) -> str:

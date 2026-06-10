@@ -82,12 +82,14 @@
           <th>Engine</th>
           <th>Group</th>
           <th>Type</th>
+          <th>Action</th>
           <th>Message</th>
+          <th>Relay</th>
           <th>Error</th>
         </tr>
       </thead>
       <tbody>
-        {% for event in audit_file.events.all %}
+        {% for event in event_rows %}
           <tr>
             <td class="is-right is-mono is-muted">{{ event.line_number }}</td>
             <td>
@@ -102,19 +104,29 @@
             <td class="is-mono is-muted">{{ event.account_ref|default:"–"|truncatechars:9 }}</td>
             <td class="is-mono is-muted">{{ event.engine_id|default:"–"|truncatechars:9 }}</td>
             <td class="is-mono is-muted">
-              {% if event.group %}
-                <a href="{% url 'group-detail' event.group.slug %}">{{ event.group_ref|default:event.group.slug|truncatechars:13 }}</a>
-              {% else %}
-                {{ event.group_ref|default:"–"|truncatechars:13 }}
-              {% endif %}
+              {{ event.group_ref|default:"–"|truncatechars:13 }}
             </td>
             <td>{{ event.event_type|default:"–" }}</td>
-            <td class="is-mono is-muted">{% if event.msg_id %}{{ event.msg_id|truncatechars:13 }}{% elif event.outbound_msg_id %}{{ event.outbound_msg_id|truncatechars:13 }}{% else %}–{% endif %}</td>
+            <td class="is-wrap">
+              {% if event.human_action %}
+                <span class="cell-lines">
+                  <span class="cell-title">{{ event.human_action }}</span>
+                  <span class="cell-sub">
+                    {{ event.human_action_origin|default:"–" }}{% if event.human_action_phase %} · {{ event.human_action_phase }}{% endif %}
+                    {% if event.human_action_fields %}<br>{{ event.human_action_fields|join:", " }}{% endif %}
+                  </span>
+                </span>
+              {% else %}
+                <span class="empty">–</span>
+              {% endif %}
+            </td>
+            <td class="is-mono is-muted">{% for msg_id in event.message_ids|slice:":2" %}{{ msg_id|truncatechars:13 }}{% if not forloop.last %}<br>{% endif %}{% empty %}–{% endfor %}</td>
+            <td class="is-muted is-wrap">{{ event.relay_summary|default:"–" }}</td>
             <td class="is-muted is-wrap">{{ event.validation_error|default:"–" }}</td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="10" class="empty">No unique events stored for this file.</td>
+            <td colspan="12" class="empty">No unique events stored for this file.</td>
           </tr>
         {% endfor %}
       </tbody>

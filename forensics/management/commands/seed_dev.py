@@ -9,9 +9,6 @@ from forensics.ingest import ingest_audit_log_bytes
 DEFAULT_FIXTURES = (
     "sample-audit-log-alice.jsonl",
     "sample-audit-log-bob.jsonl",
-    "sample-fork-demo-alice.jsonl",
-    "sample-fork-demo-bob.jsonl",
-    "sample-fork-demo-carol.jsonl",
 )
 
 # Engine-lane labels for the bundled fixtures so the timeline columns read
@@ -19,9 +16,6 @@ DEFAULT_FIXTURES = (
 FIXTURE_SOURCE_LABELS = {
     "sample-audit-log-alice.jsonl": ("Alice", "iPhone 15", "ios"),
     "sample-audit-log-bob.jsonl": ("Bob", "Pixel 9", "android"),
-    "sample-fork-demo-alice.jsonl": ("Alice", "iPhone 15", "ios"),
-    "sample-fork-demo-bob.jsonl": ("Bob", "Pixel 9", "android"),
-    "sample-fork-demo-carol.jsonl": ("Carol", "MacBook Air", "macos"),
 }
 
 

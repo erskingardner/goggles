@@ -38,7 +38,15 @@ def audit_event(
     account_ref=ACCOUNT_ALICE,
     kind=None,
     wall_time_ms=None,
+    context=None,
+    human_action=None,
 ):
+    action = human_action or {
+        "action": "update_group_profile",
+        "origin": "local_user",
+        "fields": ["name"],
+        "component_ids": [32769],
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "seq": seq,
@@ -46,6 +54,9 @@ def audit_event(
         "account_ref": account_ref,
         "engine_id": engine_id,
         "group_ref": group_ref,
+        "context": context
+        if context is not None
+        else {"operation_id": f"op-{seq}", "human_action": action},
         "kind": kind
         or {
             "type": "ingest_entry",
@@ -624,6 +635,68 @@ class AuditLogIngestionTests(TestCase):
                 },
             ),
             (
+                "publish_attempt",
+                {
+                    "type": "publish_attempt",
+                    "msg_id": MSG_ID,
+                    "target_kind": "group",
+                    "relay_urls": ["wss://relay1.example", "wss://relay2.example"],
+                    "required_acks": 1,
+                },
+                {
+                    "msg_id": MSG_ID,
+                    "target_kind": "group",
+                    "relay_urls": ["wss://relay1.example", "wss://relay2.example"],
+                    "required_acks": 1,
+                },
+            ),
+            (
+                "publish_outcome",
+                {
+                    "type": "publish_outcome",
+                    "msg_id": MSG_ID,
+                    "target_kind": "group",
+                    "accepted_relay_urls": ["wss://relay1.example"],
+                    "failed_relays": [{"relay_url": "wss://relay2.example", "reason": "timeout"}],
+                    "required_acks": 1,
+                    "met_required_acks": True,
+                },
+                {
+                    "msg_id": MSG_ID,
+                    "target_kind": "group",
+                    "accepted_relay_urls": ["wss://relay1.example"],
+                    "failed_relays": [{"relay_url": "wss://relay2.example", "reason": "timeout"}],
+                    "required_acks": 1,
+                    "met_required_acks": True,
+                },
+            ),
+            (
+                "human_action",
+                {
+                    "type": "human_action",
+                    "action": "promote_admin",
+                    "origin": "observed_group_event",
+                    "phase": "observed",
+                    "fields": ["admins"],
+                    "component_ids": [32770],
+                    "target_count": 1,
+                    "message_ids": [OTHER_MSG_ID],
+                    "from_epoch": 7,
+                    "to_epoch": 8,
+                },
+                {
+                    "human_action_action": "promote_admin",
+                    "human_action_origin": "observed_group_event",
+                    "human_action_phase": "observed",
+                    "human_action_fields": ["admins"],
+                    "human_action_component_ids": [32770],
+                    "human_action_target_count": 1,
+                    "human_action_message_ids": [OTHER_MSG_ID],
+                    "from_epoch": 7,
+                    "to_epoch": 8,
+                },
+            ),
+            (
                 "epoch_confirmed",
                 {
                     "type": "epoch_confirmed",
@@ -799,6 +872,8 @@ class AuditLogIngestionTests(TestCase):
         missing_kind.pop("kind")
         missing_type = audit_event(2)
         missing_type["kind"] = {}
+        old_format = audit_event(4)
+        old_format.pop("context")
         cases = [
             (
                 missing_kind,
@@ -817,8 +892,8 @@ class AuditLogIngestionTests(TestCase):
                 "kind.type must be a non-empty string",
             ),
             (
-                audit_event(4, kind={"type": "unknown_kind"}),
-                "unknown kind.type 'unknown_kind'",
+                old_format,
+                "new audit rows must include",
             ),
             (
                 audit_event(
@@ -854,8 +929,25 @@ class AuditLogIngestionTests(TestCase):
         for line_number, (_event, expected_error) in enumerate(cases, start=1):
             with self.subTest(line_number=line_number):
                 event = audit_file.events.get(line_number=line_number)
-                self.assertEqual(event.parse_status, AuditEvent.STATUS_INVALID)
-                self.assertIn(expected_error, event.validation_error)
+            self.assertEqual(event.parse_status, AuditEvent.STATUS_INVALID)
+            self.assertIn(expected_error, event.validation_error)
+
+    def test_unknown_future_kind_is_valid_with_human_action_context(self):
+        raw_token, _token = UploadToken.issue("ios test client")
+        body = jsonl(audit_event(0, kind={"type": "future_transport_detail", "shape": "new"}))
+
+        response = self.client.post(
+            reverse("api-audit-log-upload"),
+            data=body,
+            content_type="application/x-ndjson",
+            HTTP_AUTHORIZATION=f"Bearer {raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        event = AuditEvent.objects.get()
+        self.assertEqual(event.event_type, "future_transport_detail")
+        self.assertEqual(event.human_action_action, "update_group_profile")
+        self.assertEqual(event.raw_kind["shape"], "new")
 
 
 class DashboardTests(TestCase):
@@ -885,9 +977,11 @@ class DashboardTests(TestCase):
         )
         self.assertEqual(valid_response.status_code, 201)
 
+        invalid_event = audit_event(9, kind={"type": "send_entry", "intent_kind": "profile"})
+        invalid_event.pop("context")
         invalid_response = self.client.post(
             reverse("api-audit-log-upload"),
-            data=jsonl(audit_event(9, kind={"type": "unknown_kind"})),
+            data=jsonl(invalid_event),
             content_type="application/x-ndjson",
             HTTP_AUTHORIZATION=f"Bearer {raw_token}",
             HTTP_X_GOGGLES_PLATFORM="iOS",
@@ -918,7 +1012,7 @@ class DashboardTests(TestCase):
         self.assertContains(response, "9.9.9")
         self.assertContains(response, "203.0.113.10")
         self.assertContains(response, "198.51.100.22")
-        self.assertContains(response, "unknown kind.type")
+        self.assertContains(response, "new audit rows must include")
         self.assertContains(
             response,
             f'href="{reverse("audit-file-detail", args=[valid_file.id])}"',
@@ -1032,6 +1126,8 @@ class DashboardTests(TestCase):
         self.assertContains(response, 'id="timeline-data"')
         self.assertContains(response, ENGINE_ALICE)
         self.assertContains(response, ENGINE_BOB)
+        self.assertContains(response, "Actions")
+        self.assertContains(response, "update_group_profile")
         self.assertContains(response, "Message trace")
         self.assertContains(response, MSG_ID)
         self.assertContains(response, "Fork &amp; convergence")
@@ -1074,19 +1170,23 @@ class SeedDevCommandTests(TestCase):
             AuditFile.objects.filter(events__group=group).distinct().count(),
             2,
         )
-        self.assertEqual(AuditEvent.objects.filter(group=group).count(), 5)
+        self.assertEqual(AuditEvent.objects.filter(group=group).count(), 6)
         self.assertIn("admin / pass123", output.getvalue())
 
-    def test_seed_dev_seeds_fork_demo_group(self):
+    def test_seed_dev_seeds_new_format_action_logs(self):
         call_command("seed_dev", stdout=StringIO())
 
-        group = AuditGroup.objects.get(group_ref=FORK_DEMO_GROUP_REF)
+        group = AuditGroup.objects.get(group_ref=GROUP_REF)
         files = list(audit_files_for_group(group))
-        self.assertEqual(len(files), 3)
+        self.assertEqual(len(files), 2)
         self.assertTrue(all(f.validation_status == AuditFile.STATUS_VALID for f in files))
 
         events = list(valid_events_for_group(group))
-        self.assertEqual(len(events), 38)
+        self.assertEqual(len(events), 6)
+        self.assertEqual(
+            sorted({event.human_action_action for event in events}),
+            ["promote_admin", "update_group_profile"],
+        )
 
         payload = timeline_payload_for_group(group, events, files)
         self.assertEqual(
@@ -1094,30 +1194,10 @@ class SeedDevCommandTests(TestCase):
             [
                 "Alice / iPhone 15 / ios",
                 "Bob / Pixel 9 / android",
-                "Carol / MacBook Air / macos",
             ],
         )
-        self.assertEqual([ep["epoch"] for ep in payload["epochs"]], [5, 6, 7, 8, 9, 10])
-
-        seven = next(ep for ep in payload["epochs"] if ep["epoch"] == 7)
-        self.assertEqual(seven["fork_status"], "resolved")
-        self.assertEqual(len(seven["forks"]), 1)
-        self.assertEqual(seven["forks"][0]["winner"], "incumbent")
-        self.assertEqual(len(seven["snapshots"]), 1)
-        self.assertEqual(len(seven["convergences"]), 1)
-        self.assertEqual(seven["message_event_count"], 3)
-
-        nine = next(ep for ep in payload["epochs"] if ep["epoch"] == 9)
-        self.assertFalse(nine["confirmed"])
-        self.assertEqual(nine["fork_status"], "suspected")
-        self.assertEqual(nine["rollbacks"][0]["role"], "abandoned")
-
-        ten = next(ep for ep in payload["epochs"] if ep["epoch"] == 10)
-        carol_idx = payload["engines"][2]["idx"]
-        self.assertIn(carol_idx, ten["unconfirmed_engines"])
-
-        self.assertTrue(payload["integrity"]["has_fork_activity"])
-        self.assertEqual(payload["integrity"]["divergent_message_count"], 6)
+        self.assertTrue(any(item["type"] == "human_action" for item in payload["items"]))
+        self.assertTrue(any(item["type"] == "publish_outcome" for item in payload["items"]))
         self.assertEqual(payload["excluded"]["count"], 0)
 
 
@@ -1127,7 +1207,6 @@ class SeedDevCommandTests(TestCase):
 
 T0 = 1_700_000_000_000
 ENGINE_CAROL = "fedcba9876543210fedcba9876543210"
-FORK_DEMO_GROUP_REF = "55" * 32
 
 
 def ingest_body(body, **source):

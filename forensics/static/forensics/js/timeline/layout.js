@@ -56,6 +56,12 @@ const failedish = (item) =>
 
 function detailLine(item) {
   switch (item.type) {
+    case "human_action":
+      return `${item.human_action_label || item.human_action || "human action"}${item.human_action_phase ? ` · ${item.human_action_phase}` : ""}`;
+    case "publish_attempt":
+    case "publish_outcome":
+    case "publish_failure":
+      return item.relay_summary || item.summary || item.type;
     case "ingest_outcome":
       return `${item.outcome || "?"}${item.epoch != null ? ` · epoch ${item.epoch}` : ""}`;
     case "peeler_outcome":
@@ -121,8 +127,28 @@ export function computeLayout(payload) {
       continue;
     }
     switch (item.type) {
+      case "human_action":
+        col.push({
+          kind: "card",
+          t: item.t,
+          item,
+          tone: item.tone || "send",
+          lines: [
+            detailLine(item),
+            item.human_action_fields?.length ? `fields · ${item.human_action_fields.join(", ")}` : "",
+          ].filter(Boolean),
+          id: item.id,
+        });
+        break;
       case "send_entry":
-        col.push({ kind: "prop", t: item.t, h: 26, text: `intent · ${item.intent_kind || "?"}`, item, id: item.id });
+        col.push({
+          kind: "prop",
+          t: item.t,
+          h: 26,
+          text: `${item.human_action_label || "intent"} · ${item.intent_kind || "?"}`,
+          item,
+          id: item.id,
+        });
         break;
       case "auto_commit_decision":
         col.push({
@@ -178,7 +204,25 @@ export function computeLayout(payload) {
           t: item.t,
           item,
           tone: "send",
-          lines: [`${item.intent_kind || "send"} → ${item.result_kind || "?"}`],
+          lines: [
+            item.human_action_label || item.human_action || "send",
+            `${item.intent_kind || "send"} → ${item.result_kind || "?"}`,
+          ],
+          id: item.id,
+        });
+        break;
+      case "publish_attempt":
+      case "publish_outcome":
+      case "publish_failure":
+        col.push({
+          kind: "card",
+          t: item.t,
+          item,
+          tone: item.type === "publish_failure" ? "error" : item.tone,
+          lines: [
+            item.human_action_label || item.human_action || "publish",
+            detailLine(item),
+          ].filter(Boolean),
           id: item.id,
         });
         break;
@@ -187,7 +231,14 @@ export function computeLayout(payload) {
         col.push({ kind: "card", t: item.t, item, tone: "fork", lines: [item.summary], id: item.id });
         break;
       default:
-        col.push({ kind: "card", t: item.t, item, tone: item.tone || "receive", lines: [item.summary || item.type], id: item.id });
+        col.push({
+          kind: "card",
+          t: item.t,
+          item,
+          tone: item.tone || "receive",
+          lines: [item.human_action_label || item.summary || item.type],
+          id: item.id,
+        });
     }
   }
 

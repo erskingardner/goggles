@@ -462,6 +462,69 @@ a.btn:hover { text-decoration: none; }
   background: var(--accent-soft);
 }
 
+/* ---- Action groups ---- */
+.action-group {
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+  background: var(--surface-card);
+  border: var(--border-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.action-group__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: 14px 16px 12px;
+  border-bottom: var(--border-hairline) solid var(--border-subtle);
+}
+
+.action-group__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.action-group__title h3 {
+  font: var(--type-title);
+  overflow-wrap: anywhere;
+}
+
+.action-group__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  font: var(--type-data-sm);
+  color: var(--text-muted);
+}
+
+.action-group__meta span,
+.action-group__facts span {
+  min-width: 0;
+}
+
+.action-group__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+  padding: 10px 16px;
+  border-bottom: var(--border-hairline) solid var(--border-subtle);
+  background: var(--surface-sunken);
+  font: var(--type-body-sm);
+  color: var(--text-muted);
+}
+
+.action-group__facts strong {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+}
+
 /* ---- Metrics ---- */
 .metrics {
   display: grid;
@@ -604,4 +667,55 @@ kbd {
   background: var(--danger-soft);
   border-radius: var(--radius-md);
   padding: var(--space-4) var(--space-5);
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
+  }
+
+  .topbar__brand span { display: none; }
+
+  .topbar__crumbs {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .topbar__actions {
+    gap: var(--space-2);
+  }
+
+  .topbar__actions .btn {
+    padding-inline: 8px;
+  }
+
+  .page {
+    padding: var(--space-6);
+  }
+
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tabs {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+  }
+
+  .action-group__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .action-group__meta {
+    justify-content: flex-start;
+    overflow-wrap: anywhere;
+  }
 }

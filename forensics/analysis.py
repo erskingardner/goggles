@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
+from itertools import count
 
 from django.db.models import Count, Exists, Max, Min, OuterRef, Q
 
@@ -24,6 +25,10 @@ MESSAGE_EVENT_TYPES = {
     "ingest_outcome",
     "send_entry",
     "send_outcome",
+    "publish_attempt",
+    "publish_outcome",
+    "publish_failure",
+    "human_action",
     "peeler_outcome",
     "message_state_changed",
     "rejection",
@@ -265,18 +270,93 @@ def peeler_and_rejection_events(group, events=None):
     return rows
 
 
+def human_action_groups_for_group(events):
+    sequence = count()
+    groups = {}
+    for event in events:
+        if not event.human_action_action:
+            continue
+        key = event.context_operation_id or f"action:{event.human_action_action}"
+        if key not in groups:
+            groups[key] = {
+                "order": next(sequence),
+                "key": key,
+                "operation_id": event.context_operation_id,
+                "action": event.human_action_action,
+                "action_label": action_label(event.human_action_action),
+                "origin": event.human_action_origin,
+                "phase": event.human_action_phase,
+                "fields": event.human_action_fields or [],
+                "component_ids": event.human_action_component_ids or [],
+                "target_count": event.human_action_target_count,
+                "from_epoch": event.from_epoch,
+                "to_epoch": event.to_epoch,
+                "message_ids": [],
+                "events": [],
+                "relay_rows": [],
+                "first_wall_time_ms": event.wall_time_ms,
+                "last_wall_time_ms": event.wall_time_ms,
+            }
+        group = groups[key]
+        group["origin"] = group["origin"] or event.human_action_origin
+        group["phase"] = group["phase"] or event.human_action_phase
+        group["fields"] = sorted(set(group["fields"]) | set(event.human_action_fields or []))
+        group["component_ids"] = sorted(
+            set(group["component_ids"]) | set(event.human_action_component_ids or [])
+        )
+        group["target_count"] = group["target_count"] or event.human_action_target_count
+        group["from_epoch"] = (
+            group["from_epoch"] if group["from_epoch"] is not None else event.from_epoch
+        )
+        group["to_epoch"] = group["to_epoch"] if group["to_epoch"] is not None else event.to_epoch
+        group["message_ids"] = sorted(set(group["message_ids"]) | set(event_message_ids(event)))
+        if event.wall_time_ms is not None:
+            if group["first_wall_time_ms"] is None:
+                group["first_wall_time_ms"] = event.wall_time_ms
+            group["last_wall_time_ms"] = max(
+                group["last_wall_time_ms"] or event.wall_time_ms,
+                event.wall_time_ms,
+            )
+        row = event_row(event)
+        group["events"].append(row)
+        if row["relay_summary"]:
+            group["relay_rows"].append(row)
+    return sorted(
+        groups.values(),
+        key=lambda group: (
+            group["first_wall_time_ms"] is None,
+            group["first_wall_time_ms"] or 0,
+            group["order"],
+        ),
+    )
+
+
 def event_row(event: AuditEvent):
     return {
         "id": event.id,
+        "line_number": event.line_number,
+        "parse_status": event.parse_status,
+        "validation_error": event.validation_error,
         "engine_id": event.engine_id,
         "account_ref": event.account_ref,
         "event_type": event.event_type,
         "wall_time_ms": event.wall_time_ms,
         "seq": event.seq,
         "group_ref": event.group_ref,
+        "operation_id": event.context_operation_id,
+        "human_action": event.human_action_action,
+        "human_action_label": action_label(event.human_action_action),
+        "human_action_origin": event.human_action_origin,
+        "human_action_phase": event.human_action_phase,
+        "human_action_fields": event.human_action_fields,
+        "human_action_component_ids": event.human_action_component_ids,
+        "human_action_target_count": event.human_action_target_count,
         "msg_id": event.msg_id or event.outbound_msg_id or event.invalidated_msg_id,
+        "message_ids": event_message_ids(event),
         "epoch": event_epoch(event),
         "digest": event.candidate_digest or event.payload_digest or event.incumbent_digest,
+        "target_kind": event.target_kind,
+        "relay_summary": relay_summary(event),
         "outcome": (
             event.outcome or event.outcome_kind or event.decision or event.winner or event.new_state
         ),
@@ -286,6 +366,22 @@ def event_row(event: AuditEvent):
 
 
 def event_summary(event: AuditEvent) -> str:
+    if event.event_type == "human_action":
+        label = action_label(event.human_action_action)
+        suffix = secondary_action_label(event)
+        return f"{label}{f' · {suffix}' if suffix else ''}"
+    if event.event_type == "publish_attempt":
+        relay_count = len(event.relay_urls or [])
+        return f"publish attempt · {relay_count} relay{'' if relay_count == 1 else 's'}"
+    if event.event_type == "publish_outcome":
+        accepted = len(event.accepted_relay_urls or [])
+        failed = len(event.failed_relays or [])
+        return f"publish outcome · {accepted} accepted / {failed} failed"
+    if event.event_type == "publish_failure":
+        return f"publish failure{f' · {event.reason}' if event.reason else ''}"
+    if event.human_action_action:
+        label = action_label(event.human_action_action)
+        return f"{event.event_type} · {label}"
     if event.event_type == "fork_resolution":
         return f"{event.winner} at source epoch {event.source_epoch}"
     if event.event_type == "convergence_decision":
@@ -307,6 +403,12 @@ def event_summary(event: AuditEvent) -> str:
 
 
 def event_tone(event: AuditEvent) -> str:
+    if event.event_type == "human_action":
+        return "send" if event.human_action_origin == "local_user" else "receive"
+    if event.event_type == "publish_failure":
+        return "error"
+    if event.event_type == "publish_outcome" and event.failed_relays:
+        return "error" if not event.met_required_acks else "send"
     tone = "send" if event.event_type.startswith("send_") else "receive"
     if event.event_type in {"fork_resolution", "convergence_decision"}:
         tone = "fork"
@@ -334,7 +436,44 @@ def event_message_ids(event: AuditEvent):
         if value:
             ids.append(value)
     ids.extend(event.outbound_welcome_msg_ids or [])
+    ids.extend(event.human_action_message_ids or [])
     return ids
+
+
+def action_label(value: str) -> str:
+    return value.replace("_", " ").strip().title() if value else ""
+
+
+def secondary_action_label(event: AuditEvent) -> str:
+    parts = []
+    if event.human_action_origin:
+        parts.append(event.human_action_origin)
+    if event.human_action_phase:
+        parts.append(event.human_action_phase)
+    if event.human_action_fields:
+        parts.append(", ".join(event.human_action_fields))
+    if event.from_epoch is not None or event.to_epoch is not None:
+        parts.append(f"epoch {event.from_epoch or '-'} -> {event.to_epoch or '-'}")
+    return " · ".join(parts)
+
+
+def relay_summary(event: AuditEvent) -> str:
+    if event.event_type == "publish_attempt":
+        relay_count = len(event.relay_urls or [])
+        if not relay_count:
+            return ""
+        return f"{relay_count} target relay{'' if relay_count == 1 else 's'}"
+    if event.event_type == "publish_outcome":
+        accepted = len(event.accepted_relay_urls or [])
+        failed = len(event.failed_relays or [])
+        required = f" / {event.required_acks} required" if event.required_acks is not None else ""
+        return f"{accepted} accepted, {failed} failed{required}"
+    if event.event_type == "publish_failure":
+        relays = event.relay_urls or []
+        if relays:
+            return f"failed on {len(relays)} relay{'' if len(relays) == 1 else 's'}"
+        return event.reason or event.detail
+    return ""
 
 
 def message_ids_from_events(events):
@@ -643,13 +782,25 @@ def timeline_items(events, engine_idx, roles):
             "tone": event_tone(event),
             "role": roles.get(event.id),
             "epoch": event_epoch(event),
-            "msg_id": event.msg_id or event.outbound_msg_id,
+            "msg_id": event.msg_id
+            or event.outbound_msg_id
+            or (event.human_action_message_ids or [None])[0],
+            "message_ids": event_message_ids(event),
             "related_key": (
                 event.msg_id
                 or event.outbound_msg_id
+                or (event.human_action_message_ids or [None])[0]
                 or event.candidate_digest
                 or event.payload_digest
             ),
+            "operation_id": event.context_operation_id,
+            "human_action": event.human_action_action,
+            "human_action_label": action_label(event.human_action_action),
+            "human_action_origin": event.human_action_origin,
+            "human_action_phase": event.human_action_phase,
+            "human_action_fields": event.human_action_fields,
+            "target_kind": event.target_kind,
+            "relay_summary": relay_summary(event),
             "envelope_kind": event.envelope_kind,
             "intent_kind": event.intent_kind,
             "result_kind": event.result_kind,

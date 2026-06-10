@@ -12,10 +12,12 @@ from django.views.decorators.http import require_POST
 
 from .analysis import (
     audit_files_for_group,
+    event_row,
     file_rows_for_group,
     fork_and_convergence_events,
     group_list_rows,
     group_summary,
+    human_action_groups_for_group,
     message_traces_for_group,
     missing_observations_for_group,
     peeler_and_rejection_events,
@@ -78,6 +80,7 @@ def group_detail(request: HttpRequest, slug: str):
             "group": group,
             "summary": group_summary(group, audit_files, events=events),
             "audit_files": file_rows_for_group(audit_files, group),
+            "human_action_groups": human_action_groups_for_group(events),
             "message_traces": traces,
             "missing_observations": missing_observations_for_group(group, traces=traces),
             "fork_events": fork_and_convergence_events(group, events=events),
@@ -98,6 +101,7 @@ def audit_file_detail(request: HttpRequest, pk: int):
         "forensics/audit_file_detail.html",
         {
             "audit_file": audit_file,
+            "event_rows": [event_row(event) for event in audit_file.events.all()],
             "groups": groups_for_audit_file(audit_file),
         },
     )

@@ -95,12 +95,13 @@ function cardEl(visual, x) {
   const item = visual.item;
   const badge = TONE_BADGE[visual.tone] ? TONE_BADGE[visual.tone](visual) : "";
   const ref = item.msg_id || item.digest;
+  const title = item.human_action || item.type;
   const lines = visual.lines
     .map((line) => `<div class="tl-card__line">${esc(line)}</div>`)
     .join("");
   const related = item.related_key ? ` data-related="${esc(item.related_key)}"` : "";
   return `
-    <div class="tl-card tl-card--${visual.tone}"${related} title="${esc(item.type)} · seq ${esc(item.seq)}${ref ? ` · ${esc(ref)}` : ""}"
+    <div class="tl-card tl-card--${visual.tone}"${related} title="${esc(title)} · seq ${esc(item.seq)}${ref ? ` · ${esc(ref)}` : ""}"
       style="left:${x}px; top:${visual._y}px; width:${colInnerW}px; min-height:${visual.h - 6}px">
       <div class="tl-card__head"><span class="tl-card__clock">${clockOf(visual.t)}</span>${badge}</div>
       ${ref ? `<div class="tl-card__msg">${esc(short(ref, 12))}</div>` : ""}
