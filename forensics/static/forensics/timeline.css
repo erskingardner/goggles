@@ -114,6 +114,12 @@
   gap: var(--space-8);
 }
 
+/* Children must keep their natural height so the panel overflows and scrolls;
+   otherwise overflow:hidden cards shrink to fit the viewport and get clipped. */
+.tab-scroll > * {
+  flex-shrink: 0;
+}
+
 .tab-scroll > .card {
   max-width: 1240px;
   margin: 0 auto;
