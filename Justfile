@@ -18,6 +18,10 @@ default:
 sync:
     uv sync
 
+# Install locked dependencies exactly as GitHub Actions does.
+sync-frozen:
+    uv sync --frozen
+
 # Apply migrations to the durable local development database.
 migrate: _dev-db-dir
     DATABASE_URL='{{database_url}}' {{python}} manage.py migrate
@@ -74,6 +78,20 @@ test-postgres:
 lint:
     uv run ruff check .
 
+# Audit the locked dependency set.
+audit-dependencies:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    requirements_file="$(mktemp)"
+    trap 'rm -f "$requirements_file"' EXIT
+    uv export --locked --all-groups --format requirements-txt -o "$requirements_file"
+    uv run --with pip-audit==2.10.0 pip-audit \
+      -r "$requirements_file" \
+      --strict \
+      --require-hashes \
+      --disable-pip \
+      --progress-spinner off
+
 # Format Python code with Ruff.
 format:
     uv run ruff format .
@@ -84,6 +102,9 @@ format-check:
 
 # Run the normal local verification suite.
 check: test django-check lint format-check check-migrations
+
+# Run the same push/PR checks as GitHub Actions.
+ci: sync-frozen test test-postgres django-check lint format-check check-migrations audit-dependencies
 
 _dev-db-dir:
     @mkdir -p "$(dirname '{{justfile_directory()}}/{{dev_db}}')"

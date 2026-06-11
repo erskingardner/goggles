@@ -31,6 +31,7 @@
       {% block breadcrumb %}{% endblock %}
     </nav>
     <div class="topbar__spacer"></div>
+    {% block topbar_tools %}{% endblock %}
     <div class="topbar__actions">
       {% if request.user.is_authenticated %}
         <a class="btn btn--ghost btn--sm" href="{% url 'upload-log-list' %}">Upload logs</a>

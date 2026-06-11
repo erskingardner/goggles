@@ -35,6 +35,8 @@ MESSAGE_EVENT_TYPES = {
 }
 
 VIZ_PALETTE_SIZE = 8
+GROUP_REF_FULL_DISPLAY_MAX = 80
+GROUP_REF_EDGE_DISPLAY_CHARS = 32
 
 
 def audit_files_for_group(group):
@@ -143,6 +145,9 @@ def group_list_rows():
     groups = list(annotated_group_list())
     divergent = divergent_counts_for_groups(groups)
     for group in groups:
+        search_ref = group.group_ref or group.slug
+        group.search_ref = search_ref
+        group.display_ref = display_group_ref(search_ref)
         group.divergent_count = divergent.get(group.pk, 0)
         group.last_activity = (
             datetime.fromtimestamp(group.last_activity_ms / 1000, tz=UTC)
@@ -150,6 +155,12 @@ def group_list_rows():
             else None
         )
     return groups
+
+
+def display_group_ref(value: str) -> str:
+    if len(value) <= GROUP_REF_FULL_DISPLAY_MAX:
+        return value
+    return f"{value[:GROUP_REF_EDGE_DISPLAY_CHARS]}...{value[-GROUP_REF_EDGE_DISPLAY_CHARS:]}"
 
 
 def divergent_counts_for_groups(groups):

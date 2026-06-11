@@ -11,6 +11,7 @@ from django.urls import reverse
 
 from .analysis import (
     audit_files_for_group,
+    display_group_ref,
     group_list_rows,
     timeline_payload_for_group,
     valid_events_for_group,
@@ -1527,6 +1528,22 @@ class GroupListAnnotationTests(TestCase):
         self.assertFalse(clean_group.has_fork_activity)
         self.assertEqual(clean_group.divergent_count, 0)
 
+    def test_rows_expose_group_ref_display_and_search_values(self):
+        self.seed_clean_group()
+        long_ref = "ab" * 60
+        AuditGroup.objects.create(name="Group legacy", slug="legacy-ref", group_ref=long_ref)
+
+        rows = {group.slug: group for group in group_list_rows()}
+
+        self.assertEqual(rows[GROUP_REF].display_ref, GROUP_REF)
+        self.assertEqual(rows[GROUP_REF].search_ref, GROUP_REF)
+        self.assertEqual(rows["legacy-ref"].display_ref, display_group_ref(long_ref))
+        self.assertEqual(rows["legacy-ref"].search_ref, long_ref)
+        self.assertEqual(
+            rows["legacy-ref"].display_ref,
+            f"{long_ref[:32]}...{long_ref[-32:]}",
+        )
+
     def test_group_list_view_query_count_is_bounded(self):
         self.seed_fork_group()
         self.seed_clean_group()
@@ -1538,6 +1555,21 @@ class GroupListAnnotationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(len(ctx.captured_queries), 8)
+
+    def test_group_list_view_renders_search_and_group_ref_without_generated_label(self):
+        self.seed_clean_group()
+        User.objects.create_user(username="analyst", password="correct horse battery staple")
+        self.client.login(username="analyst", password="correct horse battery staple")
+
+        response = self.client.get(reverse("group-list"))
+
+        self.assertContains(response, "data-group-search")
+        self.assertContains(response, "data-group-count-title")
+        self.assertContains(response, "table-search")
+        self.assertContains(response, "All groups")
+        self.assertContains(response, f'data-group-ref="{GROUP_REF}"')
+        self.assertContains(response, f">{GROUP_REF}</a>")
+        self.assertNotContains(response, f"Group {GROUP_REF[:12]}")
 
 
 class GroupDetailTimelineViewTests(TestCase):

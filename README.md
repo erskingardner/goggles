@@ -36,6 +36,8 @@ just format              # format Python code with Ruff
 just format-check        # fail if Python code is not Ruff-formatted
 just test-postgres       # run tests against a disposable Postgres service
 just check               # run tests, Django checks, Ruff, format check, and migrations
+just audit-dependencies  # audit the locked dependency set with pip-audit
+just ci                  # run the same push/PR checks as GitHub Actions
 ```
 
 Set `GOGGLES_DEV_DB` to use a different local SQLite path, or `GOGGLES_DEV_PORT` to run the dev server on another port. The VM path should use PostgreSQL.
@@ -45,6 +47,10 @@ Set `GOGGLES_DEV_DB` to use a different local SQLite path, or `GOGGLES_DEV_PORT`
 `DATABASE_URL=postgres://goggles:goggles@127.0.0.1:55432/goggles_test`, then
 removes the test database container. Set `GOGGLES_TEST_DB_PORT` or
 `GOGGLES_TEST_DATABASE_URL` if that local port is already in use.
+
+`just ci` is the full local GitHub Actions parity gate. It runs a frozen
+dependency sync, the SQLite and PostgreSQL test suites, Django checks, Ruff,
+format checking, migration drift checking, and the locked dependency audit.
 
 ## Upload An Audit Log
 

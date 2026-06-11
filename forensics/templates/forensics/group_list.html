@@ -17,12 +17,28 @@
 </section>
 
 <section class="card card--flush">
-  <header class="card__header"><span class="card__title">All groups</span></header>
+  <header class="card__header card__header--with-tools">
+    <span class="card__title" data-group-count-title>All groups</span>
+    <div class="table-search" role="search">
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <label class="sr-only" for="group-search">Search groups by ID</label>
+      <input
+        class="table-search__input"
+        id="group-search"
+        type="search"
+        placeholder="Search group ID"
+        autocomplete="off"
+        spellcheck="false"
+        aria-keyshortcuts="Meta+K Control+K"
+        data-group-search
+      >
+    </div>
+  </header>
   <div class="card__body table-scroll">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Group / case</th>
+          <th>Group ID</th>
           <th class="is-right">Engines</th>
           <th>Epochs</th>
           <th class="is-right">Events</th>
@@ -34,8 +50,12 @@
       </thead>
       <tbody>
         {% for group in groups %}
-          <tr data-href="{% url 'group-detail' group.slug %}">
-            <td>
+          <tr
+            data-href="{% url 'group-detail' group.slug %}"
+            data-group-row
+            data-group-ref="{{ group.search_ref }}"
+          >
+            <td class="group-id-cell">
               <span class="cell-stack">
                 {% if group.engine_count > 2 %}
                   <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>
@@ -43,8 +63,11 @@
                   <svg class="icon" aria-hidden="true"><use href="#i-message"/></svg>
                 {% endif %}
                 <span class="cell-lines">
-                  <a class="cell-title" href="{% url 'group-detail' group.slug %}">{{ group.name }}</a>
-                  <span class="cell-sub">{{ group.group_ref|truncatechars:21 }}</span>
+                  <a
+                    class="cell-title group-ref"
+                    href="{% url 'group-detail' group.slug %}"
+                    title="{{ group.search_ref }}"
+                  >{{ group.display_ref }}</a>
                 </span>
               </span>
             </td>
@@ -74,6 +97,9 @@
             <td colspan="8" class="empty">No groups yet. Upload an audit log to create one.</td>
           </tr>
         {% endfor %}
+        <tr data-group-search-empty hidden>
+          <td colspan="8" class="empty">No groups match that ID.</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -82,4 +108,5 @@
 
 {% block scripts %}
 <script type="module" src="{% static 'forensics/js/rowlink.js' %}"></script>
+<script type="module" src="{% static 'forensics/js/group-search.js' %}"></script>
 {% endblock %}
