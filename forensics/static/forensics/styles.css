@@ -314,13 +314,13 @@ a.btn:hover { text-decoration: none; }
 }
 
 .table-search {
-  flex: 0 1 320px;
-  min-width: 220px;
-  height: 32px;
+  flex: 0 1 360px;
+  min-width: 260px;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 0 10px;
+  padding: 0 12px;
   border: var(--border-hairline) solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-app);
@@ -339,6 +339,8 @@ a.btn:hover { text-decoration: none; }
 }
 
 .table-search__input {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   min-width: 0;
   height: 100%;
@@ -347,7 +349,7 @@ a.btn:hover { text-decoration: none; }
   outline: none;
   background: transparent;
   color: var(--text-primary);
-  font: var(--type-body-sm);
+  font: var(--type-body);
 }
 
 .table-search__input::placeholder { color: var(--text-faint); }

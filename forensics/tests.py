@@ -1567,6 +1567,7 @@ class GroupListAnnotationTests(TestCase):
         self.assertContains(response, "data-group-count-title")
         self.assertContains(response, "table-search")
         self.assertContains(response, "All groups")
+        self.assertNotContains(response, 'for="group-search"')
         self.assertContains(response, f'data-group-ref="{GROUP_REF}"')
         self.assertContains(response, f">{GROUP_REF}</a>")
         self.assertNotContains(response, f"Group {GROUP_REF[:12]}")
